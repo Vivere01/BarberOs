@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  # BarberOS API Server
+  barberos-api:
+    build: .
+    container_name: barberos-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app
+      - DATABASE_URL=sqlite+aiosqlite:///./data/barberos.db
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./data:/app/data
+      - ./knowledge_base:/app/knowledge_base
+    depends_on:
+      - redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis (Cache de sessões e conversas)
+  redis:
+    image: redis:7-alpine
+    container_name: barberos-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  redis-data:

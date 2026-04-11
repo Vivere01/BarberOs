@@ -1,0 +1,88 @@
+# ============================================
+# TEMPLATE DE KNOWLEDGE BASE - BARBEARIA
+# ============================================
+# Este arquivo configura o contexto de uma barbearia.
+# Cada barbearia deve ter seu próprio arquivo YAML.
+# Os dados aqui são usados como FONTE DE VERDADE para o agente.
+# O agente NÃO pode inventar dados — só usa o que está aqui.
+
+barbershop:
+  name: "Barbearia Exemplo"
+  id: "barbearia-exemplo-001"
+  address: "Rua Exemplo, 123 - Centro - São Paulo/SP"
+  phone: "(11) 99999-9999"
+  maps_link: "https://maps.google.com/?q=..."
+  instagram: "@barbearia.exemplo"
+  
+  # Sistema de agendamento utilizado
+  scheduling_system: "cashbarber"  # ou "appbarber"
+
+business_hours:
+  monday:
+    open: "09:00"
+    close: "20:00"
+  tuesday:
+    open: "09:00"
+    close: "20:00"
+  wednesday:
+    open: "09:00"
+    close: "20:00"
+  thursday:
+    open: "09:00"
+    close: "20:00"
+  friday:
+    open: "09:00"
+    close: "21:00"
+  saturday:
+    open: "08:00"
+    close: "18:00"
+  sunday:
+    closed: true
+
+# FAQ personalizado da barbearia
+# O agente usa essas respostas ao invés de inventar
+faq:
+  - question: "Como agendar um horário?"
+    answer: "Você pode agendar diretamente por aqui! Basta me dizer o serviço desejado, o profissional e a data/horário."
+  
+  - question: "Como cancelar um agendamento?"
+    answer: "É só me avisar que deseja cancelar! Peço apenas que faça com pelo menos 2 horas de antecedência."
+  
+  - question: "Aceitam cartão?"
+    answer: "Sim! Aceitamos dinheiro, PIX, débito e crédito."
+  
+  - question: "Precisa agendar?"
+    answer: "Recomendamos agendar para garantir seu horário, mas também atendemos por ordem de chegada quando há disponibilidade."
+  
+  - question: "Quanto tempo demora o corte?"
+    answer: "O tempo varia conforme o serviço. Um corte social leva em média 30 minutos, barba 20 minutos."
+  
+  - question: "Atendem crianças?"
+    answer: "Sim! Atendemos todas as idades. Crianças até 10 anos têm um valor especial."
+  
+  - question: "Tem estacionamento?"
+    answer: "Temos estacionamento próprio gratuito para clientes."
+
+# Regras de negócio do agente
+rules:
+  # Agendamento máximo de X dias no futuro
+  max_advance_days: 30
+  
+  # Mínimo de X minutos de antecedência para agendar
+  min_advance_minutes: 60
+  
+  # Política de cancelamento
+  cancellation_policy: "Cancelamentos devem ser feitos com pelo menos 2 horas de antecedência."
+  
+  # Máximo de agendamentos por cliente por dia
+  max_appointments_per_day: 2
+  
+  # Mensagem de boas-vindas personalizada
+  welcome_message: "Olá! Bem-vindo(a) à Barbearia Exemplo! 💈 Como posso te ajudar?"
+
+# Personalidade do agente
+personality:
+  tone: "amigável e profissional"
+  language: "português brasileiro"
+  emoji_usage: "moderado"
+  formality: "informal mas respeitoso"
