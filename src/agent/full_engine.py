@@ -1,68 +1,57 @@
 """
-BarberOS - Full Engine com Execução de Ferramentas
-===================================================
-O Grafo agora executa ferramentas e volta para o modelo para validar.
+BarberOS - Full Engine (Brain Node)
+===================================
+Versão otimizada para ser o "Cérebro" do N8N.
+Recebe dados de scraping externos e gerencia a lógica.
 """
-from typing import Annotated, TypedDict, List
+from typing import Annotated, TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode # Nó que executa as ferramentas
 from langgraph.checkpoint.memory import MemorySaver
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_core.tools import tool
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from src.config.settings import get_settings
 
-# --- Importamos seus Scrapers reais ---
-from src.integrations.cashbarber.client import CashBarberScraper
-
-@tool
-async def search_slots(date: str):
-    """Buscador de horários reais no sistema. Use para agendamentos."""
-    scraper = CashBarberScraper()
-    # No seu caso, o login é feito aqui com os dados do cliente
-    return await scraper.get_available_slots(date)
-
-tools = [search_slots]
-tool_node = ToolNode(tools)
-
-# --- Estado ---
+# --- Estado do Agente ---
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], "Historico"]
+    context_data: Optional[dict] # Dados de scraping vindos do N8N
     needs_human: bool
 
 # --- Lógica do Modelo ---
 def call_model(state: AgentState):
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.1)
-    llm_with_tools = llm.bind_tools(tools)
-    response = llm_with_tools.invoke(state["messages"])
-    return {"messages": [response]}
+    settings = get_settings()
+    
+    # IMPORTANTE: Passando a chave explicitamente para evitar o erro que deu no servidor
+    llm = ChatOpenAI(
+        model=settings.openai_model, 
+        temperature=settings.openai_temperature,
+        openai_api_key=settings.openai_api_key.get_secret_value()
+    )
+    
+    # Se o N8N mandou dados de scraping, injetamos no System Prompt como "Fonte da Verdade"
+    context_str = ""
+    if state.get("context_data"):
+        context_str = f"\n\nFONTE DE VERDADE (DADOS REAIS DO SISTEMA):\n{state['context_data']}"
 
-# --- Decisor: Continuar ou Parar ---
-def should_continue(state: AgentState):
-    messages = state["messages"]
-    last_message = messages[-1]
-    if last_message.tool_calls:
-        return "tools" # Se o modelo pediu ferramenta, vai para o nó de tools
-    return END # Se não, termina e responde ao N8N
+    system_message = SystemMessage(content=(
+        "Você é o recepcionista virtual inteligente da barbearia.\n"
+        "Sua tarefa é responder o cliente de forma amigável e profissional.\n"
+        "NUNCA invente preços, horários ou serviços.\n"
+        "Use apenas as informações fornecidas e, se não souber, peça para aguardar um humano."
+        f"{context_str}"
+    ))
+    
+    messages = [system_message] + state["messages"]
+    response = llm.invoke(messages)
+    
+    return {"messages": [response]}
 
 # --- Construindo o Grafo ---
 def create_full_brain():
     workflow = StateGraph(AgentState)
-    
     workflow.add_node("agent", call_model)
-    workflow.add_node("tools", tool_node)
-    
     workflow.set_entry_point("agent")
+    workflow.add_edge("agent", END)
     
-    # Condição: Se precisar de ferramenta, vai para /tools, se não, END.
-    workflow.add_conditional_edges(
-        "agent",
-        should_continue,
-    )
-    
-    # Após usar a ferramenta, ele OBRIGATORIAMENTE volta para o agente
-    # Isso permite que ele analise os dados do scraping e valide antes de responder.
-    workflow.add_edge("tools", "agent")
-    
-    checkpointer = MemorySaver()
-    return workflow.compile(checkpointer=checkpointer)
+    return workflow.compile(checkpointer=MemorySaver())
