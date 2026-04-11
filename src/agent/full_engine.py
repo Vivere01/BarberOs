@@ -2,7 +2,6 @@
 BarberOS - Full Engine (Brain Node)
 ===================================
 Versão otimizada para ser o "Cérebro" do N8N.
-Recebe dados de scraping externos e gerencia a lógica.
 """
 from typing import Annotated, TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
@@ -15,21 +14,20 @@ from src.config.settings import get_settings
 # --- Estado do Agente ---
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], "Historico"]
-    context_data: Optional[dict] # Dados de scraping vindos do N8N
+    context_data: Optional[dict]
     needs_human: bool
 
 # --- Lógica do Modelo ---
 def call_model(state: AgentState):
     settings = get_settings()
     
-    # IMPORTANTE: Passando a chave explicitamente para evitar o erro que deu no servidor
+    # CORREÇÃO: Usando a chave diretamente como string
     llm = ChatOpenAI(
         model=settings.openai_model, 
         temperature=settings.openai_temperature,
-        openai_api_key=settings.openai_api_key.get_secret_value()
+        openai_api_key=str(settings.openai_api_key)
     )
     
-    # Se o N8N mandou dados de scraping, injetamos no System Prompt como "Fonte da Verdade"
     context_str = ""
     if state.get("context_data"):
         context_str = f"\n\nFONTE DE VERDADE (DADOS REAIS DO SISTEMA):\n{state['context_data']}"
