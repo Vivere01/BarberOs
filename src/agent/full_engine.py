@@ -1,7 +1,7 @@
 """
 BarberOS - Full Engine (Brain Node)
 ===================================
-Versão otimizada para ser o "Cérebro" do N8N.
+Fundindo Persona (N8N) + Anti-Alucinação (BarberOS)
 """
 from typing import Annotated, TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
@@ -11,33 +11,31 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from src.config.settings import get_settings
 
-# --- Estado do Agente ---
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], "Historico"]
-    context_data: Optional[dict]
+    context_data: dict # Contém 'persona' e 'system_info'
     needs_human: bool
 
-# --- Lógica do Modelo ---
 def call_model(state: AgentState):
     settings = get_settings()
-    
-    # CORREÇÃO: Usando a chave diretamente como string
     llm = ChatOpenAI(
         model=settings.openai_model, 
         temperature=settings.openai_temperature,
         openai_api_key=str(settings.openai_api_key)
     )
     
-    context_str = ""
-    if state.get("context_data"):
-        context_str = f"\n\nFONTE DE VERDADE (DADOS REAIS DO SISTEMA):\n{state['context_data']}"
+    # Extraindo o que veio do N8N
+    persona = state.get("context_data", {}).get("persona", "Você é um recepcionista amigável.")
+    base_de_dados = state.get("context_data", {}).get("system_info", {})
 
+    # CRIANDO O SUPER PROMPT (Híbrido)
     system_message = SystemMessage(content=(
-        "Você é o recepcionista virtual inteligente da barbearia.\n"
-        "Sua tarefa é responder o cliente de forma amigável e profissional.\n"
-        "NUNCA invente preços, horários ou serviços.\n"
-        "Use apenas as informações fornecidas e, se não souber, peça para aguardar um humano."
-        f"{context_str}"
+        f"--- PERSONA E COMPORTAMENTO ---\n{persona}\n\n"
+        "--- REGRAS CRÍTICAS ANTI-ALUCINAÇÃO ---\n"
+        "1. Se baseie APENAS nos dados fornecidos abaixo para responder sobre preços e serviços.\n"
+        "2. Se a informação não estiver nos 'DADOS REAIS', diga que não tem acesso no momento.\n"
+        "3. Nunca invente ou prometa nada que não esteja nos dados.\n\n"
+        f"--- DADOS REAIS DO SISTEMA (Fatos) ---\n{base_de_dados}"
     ))
     
     messages = [system_message] + state["messages"]
@@ -45,7 +43,6 @@ def call_model(state: AgentState):
     
     return {"messages": [response]}
 
-# --- Construindo o Grafo ---
 def create_full_brain():
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", call_model)

@@ -1,8 +1,7 @@
 """
 BarberOS API - Brain Node
 ==========================
-Recebe: Mensagem + Contexto (Scraping) do N8N
-Retorna: Resposta inteligente validada
+Recebe: Mensagem + Treinamento (Persona) + Contexto (Scraping)
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -16,20 +15,22 @@ brain = create_full_brain()
 class ChatInput(BaseModel):
     message: str
     phone: str
-    barbershop_context: Optional[Any] = None # O N8N manda os dados do scraping aqui
+    persona: Optional[str] = None # <-- SEU TREINAMENTO (TOM DE VOZ, REGRAS)
+    barbershop_context: Optional[Any] = None # <-- SEU BANCO DE DADOS (PREÇOS, ETC)
 
 @router.post("/chat")
 async def process_chat(request: ChatInput):
-    # Usamos o telefone como thread_id para manter a memória da conversa
     config = {"configurable": {"thread_id": request.phone}}
     
     input_state = {
         "messages": [HumanMessage(content=request.message)],
-        "context_data": request.barbershop_context, # Passa o scraping pro cérebro
+        "context_data": {
+            "persona": request.persona, 
+            "system_info": request.barbershop_context
+        },
         "needs_human": False
     }
     
-    # Roda o LangGraph
     final_state = await brain.ainvoke(input_state, config=config)
     last_message = final_state["messages"][-1]
     
