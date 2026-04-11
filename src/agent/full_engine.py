@@ -1,7 +1,7 @@
 """
 BarberOS - Full Engine (Brain Node)
 ===================================
-Versão com Detecção de Intenção para o N8N.
+Versão com Detecção de Intenção (Fix Pydantic)
 """
 from typing import Annotated, TypedDict, List, Optional
 from langgraph.graph import StateGraph, END
@@ -9,7 +9,7 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field # <-- CORREÇÃO: Usando Pydantic padrão
 from src.config.settings import get_settings
 
 # --- Esquema para saída estruturada ---
@@ -33,7 +33,6 @@ def call_model(state: AgentState):
         openai_api_key=str(settings.openai_api_key)
     )
     
-    # Adicionamos uma instrução para a IA detectar o agendamento
     persona = state.get("context_data", {}).get("persona", "Você é a Ana.")
     base_de_dados = state.get("context_data", {}).get("system_info", {})
 
@@ -47,16 +46,20 @@ def call_model(state: AgentState):
     
     messages = [system_message] + state["messages"]
     
-    # Chamada dupla: uma para o texto e outra (interna/ferramenta) para o sinal
+    # Resposta de texto da IA
     response = llm.invoke(messages)
     
-    # Mini-classificador de intenção rápido
-    intent_llm = llm.with_structured_output(BookingIntent)
-    intent_signal = intent_llm.invoke([
-        SystemMessage(content="Analise a última mensagem do assistente e do humano e diga se houve uma confirmação de agendamento."),
-        messages[-1], # Última do humano
-        response      # Resposta da Ana
-    ])
+    # Detecção de intenção (Formato novo do LangChain)
+    try:
+        intent_llm = llm.with_structured_output(BookingIntent)
+        intent_signal = intent_llm.invoke([
+            SystemMessage(content="Analise a última interação e diga se houve confirmação de agendamento."),
+            messages[-1], 
+            response
+        ])
+    except Exception:
+        # Fallback caso dê erro na detecção
+        intent_signal = BookingIntent(is_booking=False)
 
     return {
         "messages": [response],
