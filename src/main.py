@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes.webhook import router as webhook_router
+from src.api.routes.chat import router as chat_router
 from src.api.routes.health import router as health_router
 from src.config.logging_config import setup_logging, get_logger
 from src.config.settings import get_settings
@@ -59,11 +60,11 @@ async def lifespan(app: FastAPI):
 # ============================================
 
 app = FastAPI(
-    title="BarberOS - AI Receptionist",
+    title="BarberOS - Motor Lógico IA",
     description=(
-        "Infraestrutura de IA para recepcionista virtual de barbearias no WhatsApp. "
-        "Integra com CashBarber e AppBarber via web scraping. "
-        "Anti-alucinação via LangGraph + validação de respostas."
+        "Motor lógico de IA que substitui o nó OpenAI nativo do N8N. "
+        "POST /api/v1/chat recebe mensagem + contexto e retorna resposta validada. "
+        "Anti-alucinação via LangGraph (5 camadas) + LangSmith (observabilidade)."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -80,16 +81,19 @@ app.add_middleware(
 
 # Registra rotas
 app.include_router(health_router)
-app.include_router(webhook_router, prefix="/api/v1")
+app.include_router(chat_router, prefix="/api/v1")  # ★ Endpoint principal: POST /api/v1/chat
+app.include_router(webhook_router, prefix="/api/v1")  # Webhook legado (opcional)
 
 
 @app.get("/")
 async def root():
     return {
         "service": "BarberOS",
-        "description": "AI Receptionist for Barbershops",
+        "type": "Motor Lógico IA — substitui nó OpenAI do N8N",
+        "endpoint_principal": "POST /api/v1/chat",
         "version": "1.0.0",
         "docs": "/docs",
+        "como_usar": "No N8N, substitua o nó OpenAI por um HTTP Request apontando para /api/v1/chat",
     }
 
 
