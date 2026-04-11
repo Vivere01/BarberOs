@@ -1,7 +1,7 @@
 """
 BarberOS API - Brain Node
 ==========================
-Recebe: Mensagem + Treinamento (Persona) + Contexto (Scraping)
+Devolve Resposta + Intenções Estruturadas
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -15,8 +15,8 @@ brain = create_full_brain()
 class ChatInput(BaseModel):
     message: str
     phone: str
-    persona: Optional[str] = None # <-- SEU TREINAMENTO (TOM DE VOZ, REGRAS)
-    barbershop_context: Optional[Any] = None # <-- SEU BANCO DE DADOS (PREÇOS, ETC)
+    persona: Optional[str] = None
+    barbershop_context: Optional[Any] = None
 
 @router.post("/chat")
 async def process_chat(request: ChatInput):
@@ -36,5 +36,6 @@ async def process_chat(request: ChatInput):
     
     return {
         "response": last_message.content,
+        "intent": final_state.get("intent"), # Aqui vem o sinal para o N8N disparar o POST
         "needs_human": final_state.get("needs_human", False)
     }
