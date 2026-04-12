@@ -9,3 +9,4 @@ pydantic-settings
 beautifulsoup4
 playwright
 loguru
+structlog
