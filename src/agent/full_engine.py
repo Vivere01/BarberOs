@@ -14,7 +14,10 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, To
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from src.config.settings import get_settings
+from src.config.logging_config import get_logger
 from src.integrations.n8n_webhooks import N8NWebhookClient
+
+logger = get_logger("agent.full_engine")
 
 # Instanciamos o cliente uma vez
 n8n = N8NWebhookClient()
