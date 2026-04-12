@@ -47,7 +47,38 @@ async def cancelar_meu_agendamento(telefone: str, motivo: str, id_agenda: int, i
     """Cancela um agendamento existente."""
     return await n8n.cancelar_agendamento(telefone, motivo, id_agenda, id_evento)
 
-tools = [buscar_disponibilidade, realizar_agendamento, consultar_meu_agendamento, cancelar_meu_agendamento]
+@tool
+async def buscar_cadastro_cliente(telefone: str):
+    """Busca se o cliente já existe na base de dados pelo telefone."""
+    return await n8n.buscar_cliente(telefone)
+
+@tool
+async def criar_cadastro_cliente(telefone: str, nome: str, email: Optional[str] = None):
+    """Cria um novo cadastro de cliente. Use quando buscar_cadastro_cliente retornar que não existe."""
+    return await n8n.criar_cliente(telefone, nome, email)
+
+@tool
+async def remarcar_agendamento(id_evento_antigo: str, nova_data_inicio: str, duracao_minutos: int, servicos_ids: List[int], id_agenda: int, id_filial: int, cliente_fone: str, titulo: str):
+    """
+    Remarca um agendamento. Internamente, você deve cancelar o antigo primeiro se ainda não o fez, 
+    ou simplesmente usar esta ferramenta que sinaliza o desejo de troca.
+    """
+    # Na prática, o N8N pode lidar com o 'reagendamento' como um cancel + create
+    cancel_res = await n8n.cancelar_agendamento(cliente_fone, "Reagendamento solicitado pelo cliente", id_agenda, id_evento_antigo)
+    if cancel_res.get("success") or not cancel_res.get("error"):
+        desc = f"Reagendamento via Ana AI (Antigo: {id_evento_antigo}). Tel: {cliente_fone}"
+        return await n8n.criar_agendamento(nova_data_inicio, duracao_minutos, titulo, desc, id_agenda, servicos_ids, id_filial)
+    return {"error": "Falha ao cancelar agendamento anterior para reagendar.", "details": cancel_res}
+
+tools = [
+    buscar_disponibilidade, 
+    realizar_agendamento, 
+    consultar_meu_agendamento, 
+    cancelar_meu_agendamento,
+    buscar_cadastro_cliente,
+    criar_cadastro_cliente,
+    remarcar_agendamento
+]
 tool_node = ToolNode(tools)
 
 # --- Estado do Agente ---
@@ -55,6 +86,8 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], "Historico"]
     context_data: dict
     needs_human: bool
+    intent: Optional[str]
+    current_action: Optional[str]
 
 # --- Lógica do Modelo ---
 def call_model(state: AgentState):
@@ -65,25 +98,39 @@ def call_model(state: AgentState):
         openai_api_key=str(settings.openai_api_key)
     ).bind_tools(tools)
     
-    persona = state.get("context_data", {}).get("persona", "Você é a Ana.")
-    # Injetamos IDs importantes que o N8N pode ter enviado (id_filial, id_agenda)
+    persona = state.get("context_data", {}).get("persona", "Você é a Ana, assistente virtual da barbearia.")
     system_info = state.get("context_data", {}).get("system_info", {})
 
     system_message = SystemMessage(content=(
         f"--- PERSONA ---\n{persona}\n\n"
         f"--- DADOS TÉCNICOS DA FILIAL ---\n{system_info}\n\n"
-        "--- INSTRUÇÕES DE FERRAMENTAS ---\n"
-        "1. Para buscar horários, use 'buscar_disponibilidade'.\n"
-        "2. Para marcar, use 'realizar_agendamento'.\n"
-        "3. Sempre use os IDs de filial e agenda que estão nos 'DADOS TÉCNICOS' se não souber o do cliente.\n"
-        "4. Formate datas em ISO 8601 com timezone -03:00 sempre.\n"
-        "NUNCA invente horários. Se o sistema retornar vazio, diga ao cliente."
+        "--- PROTOCOLO DE ATENDIMENTO ---\n"
+        "1. IDENTIFICAÇÃO: Se é o início da conversa, use 'buscar_cadastro_cliente' para ver se já conhecemos o cliente.\n"
+        "2. COLETA: Se o cliente quer agendar, identifique: Serviço, Profissional (opcional) e Data/Hora.\n"
+        "3. DISPONIBILIDADE: Assim que tiver a data e serviço, use 'buscar_disponibilidade' imediatamente. Não pergunte 'posso buscar?'.\n"
+        "4. CONCLUSÃO: Após mostrar horários e o cliente escolher, use 'realizar_agendamento'.\n"
+        "5. REAGENDAMENTO: Se o cliente quer mudar um horário, use 'remarcar_agendamento'.\n\n"
+        "--- REGRAS ANTI-LOOP ---\n"
+        "- Se você já perguntou algo e a resposta está no histórico, NÃO pergunte de novo.\n"
+        "- Se o cliente confirmou ou deu um dado, use-o para chamar a ferramenta correspondente imediatamente.\n"
+        "- Seja amigável mas extremamente eficiente. Evite frases como 'Entendo, você gostaria de...', vá direto ao ponto: 'Perfeito, vou verificar os horários para [serviço]...'.\n"
+        "- Se o sistema (ferramenta) retornar que não há horários, sugira o próximo dia disponível ou peça para o cliente sugerir um.\n\n"
+        "NUNCA invente informações. Se não souber os IDs de serviços/filial, use os que estão nos DADOS TÉCNICOS."
     ))
     
     messages = [system_message] + state["messages"]
     response = llm.invoke(messages)
     
-    return {"messages": [response]}
+    # Tentamos extrair a intenção da resposta ou das ferramentas chamadas
+    intent = state.get("intent", "conversational")
+    if response.tool_calls:
+        intent = response.tool_calls[0]["name"]
+    
+    return {
+        "messages": [response],
+        "intent": intent,
+        "needs_human": "falar com humano" in response.content.lower() or "atendente" in response.content.lower()
+    }
 
 # --- Verificador de Fluxo ---
 def should_continue(state: AgentState):

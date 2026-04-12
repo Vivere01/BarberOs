@@ -66,3 +66,15 @@ class N8NWebhookClient:
             "id_evento": id_evento
         }
         return await self._post("cancelar_agendamento", data)
+
+    async def buscar_cliente(self, phone: str):
+        data = {"telefone": phone}
+        return await self._post("buscar_cadastro_cliente", data)
+
+    async def criar_cliente(self, phone: str, name: str, email: Optional[str] = None):
+        data = {
+            "telefone": phone,
+            "nome": name,
+            "email": email
+        }
+        return await self._post("criar_cadastro_cliente", data)
