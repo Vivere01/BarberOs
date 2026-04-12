@@ -5,6 +5,7 @@ Ana agora consegue buscar horários, criar agendamentos e cancelar.
 """
 from typing import Annotated, TypedDict, List, Optional, Union
 from langgraph.graph import StateGraph, END
+from langgraph.graph.message import add
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 
@@ -83,7 +84,7 @@ tool_node = ToolNode(tools)
 
 # --- Estado do Agente ---
 class AgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], "Historico"]
+    messages: Annotated[List[BaseMessage], add]
     context_data: dict
     needs_human: bool
     intent: Optional[str]
