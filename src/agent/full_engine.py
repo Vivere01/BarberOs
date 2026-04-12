@@ -104,18 +104,18 @@ def call_model(state: AgentState):
     system_message = SystemMessage(content=(
         f"--- PERSONA ---\n{persona}\n\n"
         f"--- DADOS TÉCNICOS DA FILIAL ---\n{system_info}\n\n"
-        "--- PROTOCOLO DE ATENDIMENTO ---\n"
-        "1. IDENTIFICAÇÃO: Se é o início da conversa, use 'buscar_cadastro_cliente' para ver se já conhecemos o cliente.\n"
-        "2. COLETA: Se o cliente quer agendar, identifique: Serviço, Profissional (opcional) e Data/Hora.\n"
-        "3. DISPONIBILIDADE: Assim que tiver a data e serviço, use 'buscar_disponibilidade' imediatamente. Não pergunte 'posso buscar?'.\n"
-        "4. CONCLUSÃO: Após mostrar horários e o cliente escolher, use 'realizar_agendamento'.\n"
-        "5. REAGENDAMENTO: Se o cliente quer mudar um horário, use 'remarcar_agendamento'.\n\n"
-        "--- REGRAS ANTI-LOOP ---\n"
-        "- Se você já perguntou algo e a resposta está no histórico, NÃO pergunte de novo.\n"
-        "- Se o cliente confirmou ou deu um dado, use-o para chamar a ferramenta correspondente imediatamente.\n"
-        "- Seja amigável mas extremamente eficiente. Evite frases como 'Entendo, você gostaria de...', vá direto ao ponto: 'Perfeito, vou verificar os horários para [serviço]...'.\n"
-        "- Se o sistema (ferramenta) retornar que não há horários, sugira o próximo dia disponível ou peça para o cliente sugerir um.\n\n"
-        "NUNCA invente informações. Se não souber os IDs de serviços/filial, use os que estão nos DADOS TÉCNICOS."
+        "--- REGRAS DE OURO (MEMÓRIA E FLUXO) ---\n"
+        "1. MEMÓRIA ABSOLUTA: Antes de fazer qualquer pergunta, leia TODO o histórico de mensagens acima. Se o usuário já disse a unidade, o serviço ou o horário, NUNCA pergunte novamente.\n"
+        "2. MAPEAMENTO IMEDIATO: Se o usuário disser o nome de uma unidade (ex: 'Colorado'), mapeie imediatamente para o ID correspondente nos DADOS TÉCNICOS e prossiga.\n"
+        "3. PROATIVIDADE: Se o usuário disse 'Corte e barba' e você já sabe a unidade, chame 'buscar_disponibilidade' IMEDIATAMENTE. Não peça confirmação do serviço.\n"
+        "4. ANTI-REPETIÇÃO: Se você perguntou a unidade e o usuário respondeu 'Colorado', seu próximo passo DEVE ser sobre o serviço ou disponibilidade, NUNCA a unidade novamente.\n"
+        "5. SEJA HUMANO: Não pareça um robô de formulário. Se o usuário deu uma informação incompleta, agradeça e peça apenas o que falta.\n\n"
+        "--- PROTOCOLO DE AGENDAMENTO ---\n"
+        "Passo 1: Verifique se existe cadastro (`buscar_cadastro_cliente`).\n"
+        "Passo 2: Identifique Unidade e Serviço (Verifique se já estão no histórico!).\n"
+        "Passo 3: Chame `buscar_disponibilidade` assim que tiver Data e Serviço.\n"
+        "Passo 4: Apresente horários e finalize com `realizar_agendamento`.\n\n"
+        "NUNCA invente informações. Use apenas o que está no histórico ou nos DADOS TÉCNICOS."
     ))
     
     messages = [system_message] + state["messages"]
@@ -125,6 +125,12 @@ def call_model(state: AgentState):
     intent = state.get("intent", "conversational")
     if response.tool_calls:
         intent = response.tool_calls[0]["name"]
+    elif "unidade" in response.content.lower() or "filial" in response.content.lower():
+        intent = "perguntando_unidade"
+    elif "serviço" in response.content.lower() or "corte" in response.content.lower():
+        intent = "perguntando_servico"
+    elif "horário" in response.content.lower() or "agenda" in response.content.lower():
+        intent = "perguntando_horario"
     
     return {
         "messages": [response],
