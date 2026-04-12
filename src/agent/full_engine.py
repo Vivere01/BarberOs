@@ -109,11 +109,12 @@ def call_model(state: AgentState):
         "2. MAPEAMENTO IMEDIATO: Se o usuário disser o nome de uma unidade (ex: 'Colorado'), mapeie imediatamente para o ID correspondente nos DADOS TÉCNICOS e prossiga.\n"
         "3. PROATIVIDADE: Se o usuário disse 'Corte e barba' e você já sabe a unidade, chame 'buscar_disponibilidade' IMEDIATAMENTE. Não peça confirmação do serviço.\n"
         "4. ANTI-REPETIÇÃO: Se você perguntou a unidade e o usuário respondeu 'Colorado', seu próximo passo DEVE ser sobre o serviço ou disponibilidade, NUNCA a unidade novamente.\n"
-        "5. SEJA HUMANO: Não pareça um robô de formulário. Se o usuário deu uma informação incompleta, agradeça e peça apenas o que falta.\n\n"
+        "5. SEJA HUMANO: Não pareça um robô de formulário. Se o usuário deu uma informação incompleta, agradeça e peça apenas o que falta.\n"
+        "6. PENSAMENTO ANTES DE FALAR: Antes de perguntar 'Qual unidade?', verifique se o usuário já disse o nome de uma unidade ou se você já agradeceu pela escolha de uma unidade no histórico.\n\n"
         "--- PROTOCOLO DE AGENDAMENTO ---\n"
         "Passo 1: Verifique se existe cadastro (`buscar_cadastro_cliente`).\n"
         "Passo 2: Identifique Unidade e Serviço (Verifique se já estão no histórico!).\n"
-        "Passo 3: Chame `buscar_disponibilidade` assim que tiver Data e Serviço.\n"
+        "Passo 3: Chame `buscar_disponibilidade` assim que tiver Unidade + Serviço.\n"
         "Passo 4: Apresente horários e finalize com `realizar_agendamento`.\n\n"
         "NUNCA invente informações. Use apenas o que está no histórico ou nos DADOS TÉCNICOS."
     ))
@@ -123,14 +124,17 @@ def call_model(state: AgentState):
     
     # Tentamos extrair a intenção da resposta ou das ferramentas chamadas
     intent = state.get("intent", "conversational")
+    content_lower = response.content.lower()
+    
     if response.tool_calls:
         intent = response.tool_calls[0]["name"]
-    elif "unidade" in response.content.lower() or "filial" in response.content.lower():
-        intent = "perguntando_unidade"
-    elif "serviço" in response.content.lower() or "corte" in response.content.lower():
-        intent = "perguntando_servico"
-    elif "horário" in response.content.lower() or "agenda" in response.content.lower():
+    # Invertemos a ordem: se ela perguntou horário ou serviço, isso tem prioridade sobre "unidade"
+    elif "horário" in content_lower or "agenda" in content_lower or "disponível" in content_lower:
         intent = "perguntando_horario"
+    elif "serviço" in content_lower or "corte" in content_lower or "barba" in content_lower:
+        intent = "perguntando_servico"
+    elif "unidade" in content_lower or "filial" in content_lower or "unidades" in content_lower:
+        intent = "perguntando_unidade"
     
     return {
         "messages": [response],

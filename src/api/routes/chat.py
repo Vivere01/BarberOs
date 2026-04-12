@@ -20,6 +20,8 @@ class ChatInput(BaseModel):
 
 @router.post("/chat")
 async def process_chat(request: ChatInput):
+    # Log para diagnóstico de memória
+    print(f"DEBUG: Recebendo mensagem de {request.phone}: {request.message}")
     config = {"configurable": {"thread_id": request.phone}}
     
     input_state = {
