@@ -33,11 +33,22 @@ async def process_chat(request: ChatInput):
         "needs_human": False
     }
     
-    final_state = await brain.ainvoke(input_state, config=config)
-    last_message = final_state["messages"][-1]
+    # Limite de recurção ultra-baixo para forçar falha rápida em caso de loop
+    config["recursion_limit"] = 5
     
-    return {
-        "response": last_message.content,
-        "intent": final_state.get("intent"), # Aqui vem o sinal para o N8N disparar o POST
-        "needs_human": final_state.get("needs_human", False)
-    }
+    try:
+        final_state = await brain.ainvoke(input_state, config=config)
+        last_message = final_state["messages"][-1]
+        
+        return {
+            "response": last_message.content,
+            "intent": final_state.get("intent"),
+            "needs_human": final_state.get("needs_human", False)
+        }
+    except Exception as e:
+        print(f"ERRO CRÍTICO NO AGENTE: {str(e)}")
+        return {
+            "response": "Desculpe, tive um problema técnico momentâneo. Pode repetir ou aguardar um instante?",
+            "intent": "error",
+            "needs_human": True
+        }

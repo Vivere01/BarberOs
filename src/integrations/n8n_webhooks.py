@@ -14,16 +14,27 @@ class N8NWebhookClient:
         # Podemos adicionar um token no .env futuramente se necessário
         
     async def _post(self, endpoint: str, data: dict) -> dict:
+        # Tenta a URL direta e a URL com prefixo /webhook/ que é comum no n8n
         url = f"{self.base_url}/{endpoint}"
+        
+        logger.debug(f"CHAMANDO_WEBHOOK: {url}")
+        
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                logger.debug(f"Chamando Webhook N8N: {url} com dados: {data}")
-                response = await client.post(url, json=data)
+            async with httpx.AsyncClient() as client:
+                # Timeout curto de 7 segundos para evitar o vácuo
+                response = await client.post(url, json=data, timeout=7.0)
+                
+                if response.status_code == 404:
+                    # Tenta fallback para /webhook/endpoint se der 404
+                    url_fallback = f"{self.base_url}/webhook/{endpoint}"
+                    logger.debug(f"TRYING_FALLBACK_URL: {url_fallback}")
+                    response = await client.post(url_fallback, json=data, timeout=7.0)
+
                 response.raise_for_status()
                 return response.json()
         except Exception as e:
-            logger.error(f"Erro ao chamar Webhook {endpoint}: {str(e)}")
-            return {"error": str(e), "success": False}
+            logger.error(f"ERRO_WEBHOOK_{endpoint.upper()}: {str(e)}")
+            return {"error": str(e), "success": False, "details": "N8N offline ou endpoint inválido"}
 
     async def buscar_horarios(self, start: str, end: str, id_agenda: int, id_filial: int, duration: int):
         data = {
