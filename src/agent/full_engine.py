@@ -94,13 +94,22 @@ class AgentState(TypedDict):
     current_action: Optional[str]
 
 # --- Lógica do Modelo ---
-def call_model(state: AgentState):
+def call_model(state: AgentState, config: dict):
     settings = get_settings()
     llm = ChatOpenAI(
         model=settings.openai_model, 
-        temperature=0, # Temperatura 0 para ferramentas ser mais preciso
-        openai_api_key=str(settings.openai_api_key)
+        temperature=0, 
+        openai_api_key=str(settings.openai_api_key),
+        max_retries=2 # Aumentamos retentativas para evitar 'instabilidade' de rede
     ).bind_tools(tools)
+    
+    # --- Gesto de Memria: Mantemos apenas as ltimas 15 mensagens para no estourar o contexto ---
+    # Isso evita lentido e erros conforme a conversa cresce.
+    all_messages = state["messages"]
+    if len(all_messages) > 15:
+        messages_to_send = all_messages[-15:]
+    else:
+        messages_to_send = all_messages
     
     persona = state.get("context_data", {}).get("persona", "Você é a Ana, assistente virtual da barbearia.")
     system_info = state.get("context_data", {}).get("system_info", {})
@@ -120,10 +129,16 @@ def call_model(state: AgentState):
     ))
     
     # Log para auditoria de decisão
-    logger.debug(f"DECISAO_AGENTE: Chamando LLM para thread {state.get('thread_id')}")
+    logger.debug("DECISAO_AGENTE: Chamando LLM", thread_id=config.get("configurable", {}).get("thread_id"))
     
-    messages = [system_message] + state["messages"]
-    response = llm.invoke(messages)
+    messages = [system_message] + messages_to_send
+    
+    # Adicionamos um timeout de 30s à chamada do LLM para evitar travamentos infinitos
+    try:
+        response = llm.invoke(messages, timeout=30)
+    except Exception as e:
+        logger.error(f"FALHA_OPENAI: {str(e)}")
+        raise e
     
     # Tentamos extrair a intenção da resposta ou das ferramentas chamadas
     intent = state.get("intent", "conversational")
@@ -132,18 +147,19 @@ def call_model(state: AgentState):
     if response.tool_calls:
         intent = response.tool_calls[0]["name"]
         logger.info(f"AGENTE_ACAO: {intent}")
-    # Invertemos a ordem: se ela perguntou horário ou serviço, isso tem prioridade sobre "unidade"
     elif "horário" in content_lower or "agenda" in content_lower or "disponível" in content_lower:
         intent = "perguntando_horario"
     elif "serviço" in content_lower or "corte" in content_lower or "barba" in content_lower:
         intent = "perguntando_servico"
     elif "unidade" in content_lower or "filial" in content_lower or "unidades" in content_lower:
         intent = "perguntando_unidade"
+    elif any(greeting in content_lower for greeting in ["olá", "oi", "bom dia", "boa tarde", "boa noite"]):
+        intent = "greeting"
     
     return {
         "messages": [response],
         "intent": intent,
-        "needs_human": "falar com humano" in response.content.lower() or "atendente" in response.content.lower()
+        "needs_human": "falar com humano" in content_lower or "atendente" in content_lower
     }
 
 # --- Verificador de Fluxo ---
