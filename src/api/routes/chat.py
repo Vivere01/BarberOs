@@ -9,6 +9,7 @@ from typing import Optional, Any
 from src.agent.full_engine import create_full_brain
 from langchain_core.messages import HumanMessage
 from src.config.logging_config import get_logger
+from src.config.settings import get_settings
 
 logger = get_logger("api.chat")
 
