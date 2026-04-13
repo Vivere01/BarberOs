@@ -11,6 +11,7 @@ from langgraph.prebuilt import ToolNode
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 from src.config.settings import get_settings
@@ -94,7 +95,7 @@ class AgentState(TypedDict):
     current_action: Optional[str]
 
 # --- Lógica do Modelo ---
-def call_model(state: AgentState, config: dict):
+def call_model(state: AgentState, config: RunnableConfig):
     settings = get_settings()
     llm = ChatOpenAI(
         model=settings.openai_model, 

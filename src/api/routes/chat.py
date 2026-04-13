@@ -79,7 +79,7 @@ async def process_chat(request: ChatInput):
         print(f"--- TRACEBACK ---\n{error_trace}")
         
         return {
-            "response": "Tive uma instabilidade momentânea ao processar sua solicitação. Pode tentar novamente, por favor?",
+            "response": "Ok já irei direcionar para alguém da equipe, só um instante",
             "intent": "error",
             "needs_human": True
         }
