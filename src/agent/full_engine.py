@@ -180,9 +180,10 @@ async def buscar_disponibilidade(
         conversation_id=ctx.get("conversation_id"),
         amostras=amostras,
     )
+    logger.info(f"RESULTADO_BUSCAR_HORARIOS: status={result.get('status')}, slots_encontrados={len(result.get('slots', [])) if isinstance(result.get('slots'), list) else 'N/A'}")
     if result.get("error"):
-        logger.error(f"ERRO_BUSCAR_HORARIOS: {result}")
-        return {"status": "erro", "mensagem": "N8N retornou erro", "detalhes": result.get("error")}
+        logger.error(f"ERRO_WEBHOOK_HORARIOS: {result.get('error')}")
+        return {"status": "erro", "mensagem": "Sistema de agendamento temporariamente indisponível", "detalhes": result.get("error")}
     return result
 
 
@@ -492,8 +493,8 @@ def call_model(state: AgentState, config: RunnableConfig):
         "5. **TELEFONE ANTIGO**: Se a busca falhar, peça o número antigo antes de desistir do cadastro.\n"
         "6. **MEMÓRIA**: Leia o histórico. Se o cliente já escolheu o serviço e a unidade, não pergunte novamente.\n"
         "7. **IDs**: Use os strings exatos de 'id_agenda' e 'id_filial' dos dados técnicos.\n"
-        "8. Se o cliente disser 'Viu?', 'E aí?', 'Achou?' — significa que esperou e não recebeu retorno. "
-        "Peça desculpas brevemente e execute a ação pendente IMEDIATAMENTE.\n\n"
+        "8. **DIFICULDADES TÉCNICAS**: Se o sistema retornar erro, não oculte. Diga: 'Estou com uma instabilidade no sistema de horários agora. Posso tentar novamente em instantes ou você prefere que eu te ligue?'.\n"
+        "9. **SEM HORÁRIOS**: Se a busca retornar vazia ([]), diga: 'Infelizmente o [Barbeiro] não tem horários para esse dia. Quer que eu veja com outro profissional ou em outra data?'."
 
         "=== RESUMO PARA CONFIRMAÇÃO (MANDATÓRIO) ===\n"
         "Sempre que for confirmar um agendamento, use o formato:\n"
