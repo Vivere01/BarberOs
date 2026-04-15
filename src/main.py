@@ -8,7 +8,7 @@ para enviar via WhatsApp.
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.routes.webhook import router as webhook_router
@@ -78,6 +78,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Middleware de Log Global para diagnóstico
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    from src.config.logging_config import get_logger
+    import time
+    logger = get_logger("http")
+    start_time = time.time()
+    
+    logger.info(f"DEBUG_CONEXAO: Recebendo {request.method} em {request.url.path}")
+    
+    response = await call_next(request)
+    
+    process_time = time.time() - start_time
+    logger.info(f"DEBUG_CONEXAO: Finalizado {request.method} {request.url.path} - Status: {response.status_code} - Tempo: {process_time:.2f}s")
+    return response
 
 # Registra rotas
 app.include_router(health_router)
