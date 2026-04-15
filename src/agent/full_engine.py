@@ -169,22 +169,54 @@ async def buscar_disponibilidade(
     """
     ctx = _ctx()
     logger.info(f"TOOL_BUSCAR_HORARIOS: agenda={id_agenda}, filial={id_filial}, inicio={data_inicio}")
-    result = await n8n.buscar_horarios(
-        start=data_inicio,
-        end=data_fim,
-        id_agenda=id_agenda,
-        id_filial=id_filial,
-        duration=duracao_total_minutos,
-        inbox=ctx.get("inbox"),
-        contact_id=ctx.get("contact_id"),
-        conversation_id=ctx.get("conversation_id"),
-        amostras=amostras,
-    )
-    logger.info(f"RESULTADO_BUSCAR_HORARIOS: status={result.get('status')}, slots_encontrados={len(result.get('slots', [])) if isinstance(result.get('slots'), list) else 'N/A'}")
-    if result.get("error"):
-        logger.error(f"ERRO_WEBHOOK_HORARIOS: {result.get('error')}")
-        return {"status": "erro", "mensagem": "Sistema de agendamento temporariamente indisponível", "detalhes": result.get("error")}
-    return result
+    
+    agendas_para_buscar = [id_agenda] if id_agenda else []
+    
+    # Se não informou agenda, busca em todas as disponíveis no sistema_info
+    if not id_agenda:
+        sys_info = ctx.get("system_info", {})
+        agendas_para_buscar = [str(a.get("id")) for a in sys_info.get("agendas", []) if a.get("id")]
+
+    all_slots = []
+    for agenda_id in agendas_para_buscar:
+        logger.info(f"BUSCANDO_HORARIOS_INTERNO: agenda={agenda_id}")
+        data = dict(
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            id_filial=id_filial,
+            id_agenda=agenda_id,
+            barbershop_id=ctx.get("barbershop_id"),
+            conversation_id=ctx.get("conversation_id"),
+            amostras=amostras,
+        )
+        try:
+            res = await n8n.buscar_horarios(
+                start=data_inicio,
+                end=data_fim,
+                id_agenda=agenda_id,
+                id_filial=id_filial,
+                duration=duracao_total_minutos,
+                inbox=ctx.get("inbox"),
+                contact_id=ctx.get("contact_id"),
+                conversation_id=ctx.get("conversation_id"),
+                amostras=amostras,
+            )
+            if res.get("status") == "sucesso" and res.get("slots"):
+                # Adiciona informação de qual agenda é esse slot para uso interno
+                for slot in res.get("slots"):
+                    slot["id_agenda_interno"] = agenda_id
+                all_slots.extend(res.get("slots"))
+                # Se encontrou horários para este barbeiro, já podemos retornar para ser mais rápido
+                if all_slots: break 
+        except Exception as e:
+            logger.error(f"ERRO_BUSCA_AGENDA_{agenda_id}: {e}")
+            continue
+
+    logger.info(f"RESULTADO_FINAL_BUSCA: slots_encontrados={len(all_slots)}")
+    if not all_slots:
+        return {"status": "sucesso", "slots": [], "mensagem": "Não há horários disponíveis para este período."}
+    
+    return {"status": "sucesso", "slots": all_slots}
 
 
 @tool
@@ -473,10 +505,10 @@ def call_model(state: AgentState, config: RunnableConfig):
         "- Use os DADOS TÉCNICOS DA FILIAL para validar serviços e unidades existentes.\n\n"
 
         "ETAPA 3 — CONSULTA DE HORÁRIOS (EXECUÇÃO DIRETA):\n"
-        "- Se o cliente mencionou 'horário', 'agenda' ou sugeriu uma data/hora, você DEVE chamar 'buscar_disponibilidade' IMEDIATAMENTE no mesmo turno.\n"
-        "- **PROIBIÇÃO ABSOLUTA**: Nunca envie mensagens como 'Vou verificar', 'Um momento', 'Só um instante'. O cliente não quer saber que você está procurando, ele quer o resultado.\n"
-        "- Se você recebeu o retorno da ferramenta com horários livres: Apresente-os IMEDIATAMENTE em uma lista clara. Ex: 'Tenho estes horários para hoje: 14:00, 15:30 e 17:00. Algum desses serve?'\n"
-        "- Se o cliente sugeriu um horário específico e ele está disponível: Não mostre outros horários, apenas diga que está livre e peça confirmação para agendar.\n\n"
+        "- Se o cliente mencionou 'horário' ou sugeriu uma data/hora, chame 'buscar_disponibilidade' IMEDIATAMENTE.\n"
+        "- **REGRA DE NOMES**: Só mencione o nome do barbeiro se o cliente tiver pedido por um específico. Caso contrário, diga apenas 'Temos horário disponível'.\n"
+        "- Se não houver horários, diga apenas: 'Não temos horários disponíveis para este período', sem listar nomes de profissionais.\n"
+        "- **PROIBIÇÃO ABSOLUTA**: Nunca envie mensagens de 'um momento' ou 'estou verificando'.\n\n"
 
         "ETAPA 4 — CRIAÇÃO DO AGENDAMENTO E CONFIRMAÇÃO:\n"
         "- Assim que o cliente escolher ou confirmar o horário, use o 'RESUMO PARA CONFIRMAÇÃO' abaixo.\n"
@@ -493,8 +525,8 @@ def call_model(state: AgentState, config: RunnableConfig):
         "5. **TELEFONE ANTIGO**: Se a busca falhar, peça o número antigo antes de desistir do cadastro.\n"
         "6. **MEMÓRIA**: Leia o histórico. Se o cliente já escolheu o serviço e a unidade, não pergunte novamente.\n"
         "7. **IDs**: Use os strings exatos de 'id_agenda' e 'id_filial' dos dados técnicos.\n"
-        "8. **DIFICULDADES TÉCNICAS**: Se o sistema retornar erro, não oculte. Diga: 'Estou com uma instabilidade no sistema de horários agora. Posso tentar novamente em instantes ou você prefere que eu te ligue?'.\n"
-        "9. **SEM HORÁRIOS**: Se a busca retornar vazia ([]), diga: 'Infelizmente o [Barbeiro] não tem horários para esse dia. Quer que eu veja com outro profissional ou em outra data?'."
+        "8. **PRIVACIDADE DE NOMES**: Se o cliente NÃO especificou um barbeiro, omita o campo 'Profissional' do resumo e não cite nomes na conversa. Use termos como 'Um de nossos profissionais'.\n"
+        "9. **SEM HORÁRIOS**: Se a busca retornar vazia, diga apenas que não há horários, sem mais detalhes técnicos.\n"
 
         "=== RESUMO PARA CONFIRMAÇÃO (MANDATÓRIO) ===\n"
         "Sempre que for confirmar um agendamento, use o formato:\n"
