@@ -241,10 +241,15 @@ async def buscar_disponibilidade(
 
     logger.info(f"RESULTADO_FINAL_BUSCA: total_vagas={len(unique_slots)}")
     
+    # Retorna objeto estruturado para o modelo
     if not unique_slots:
-        return "Não há horários disponíveis para o período e serviço solicitados."
+        return {"status": "sem_horarios", "mensagem": "Não encontrei horários para esta data/unidade."}
         
-    return "Horários disponíveis encontrados:\n" + "\n".join(unique_slots)
+    return {
+        "status": "sucesso", 
+        "total_encontrado": len(unique_slots),
+        "horarios": unique_slots
+    }
 
 
 @tool
