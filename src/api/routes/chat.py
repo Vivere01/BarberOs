@@ -29,9 +29,9 @@ class ChatInput(BaseModel):
 
 @router.post("/chat")
 async def process_chat(request: ChatInput):
-    # Log para diagnóstico de entrada
+    # Log ultra detalhado para capturar o que o N8N está enviando
     logger.info("="*50)
-    logger.info(f">>> NOVA MENSAGEM RECEBIDA: {request.phone} -> {request.message[:50]}...")
+    logger.info(f"DADOS_RECEBIDOS_N8N: {request.model_dump_json(indent=2)}")
     logger.info("="*50)
     
     config = {"configurable": {"thread_id": request.phone}}
