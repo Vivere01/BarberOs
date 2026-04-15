@@ -29,8 +29,11 @@ class ChatInput(BaseModel):
 
 @router.post("/chat")
 async def process_chat(request: ChatInput):
-    # Log para diagnóstico de memória
-    print(f"DEBUG: Recebendo mensagem de {request.phone}: {request.message}")
+    # Log para diagnóstico de entrada
+    logger.info("="*50)
+    logger.info(f">>> NOVA MENSAGEM RECEBIDA: {request.phone} -> {request.message[:50]}...")
+    logger.info("="*50)
+    
     config = {"configurable": {"thread_id": request.phone}}
 
     # ★ Injeta contexto Chatwoot nas tools ANTES de invocar o brain
