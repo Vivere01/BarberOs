@@ -19,6 +19,8 @@ Correções v2.1 (Abril 2026):
 """
 from typing import Annotated, TypedDict, List, Optional
 from contextvars import ContextVar
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from langgraph.graph import StateGraph, END
 from operator import add
 from langgraph.checkpoint.memory import MemorySaver
@@ -60,6 +62,49 @@ def set_session_context(inbox: Optional[str] = None,
 def _ctx() -> dict:
     """Retorna o contexto Chatwoot do request atual (isolado por coroutine)."""
     return _session_ctx.get({}).copy()
+
+
+# ===================================================================
+# Calendário Real — Brasília (UTC-3)
+# LLMs não sabem a data de hoje. Injetamos explicitamente para que
+# expressões como "essa sexta", "amanhã", "hoje" sejam calculadas certo.
+# ===================================================================
+_DIAS_PT = ["segunda-feira", "terça-feira", "quarta-feira",
+            "quinta-feira", "sexta-feira", "sábado", "domingo"]
+_MESES_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
+             "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+
+
+def _get_datetime_context() -> str:
+    """Retorna bloco de data/hora atual (Brasília) para injetar no system prompt.
+    Pré-calcula os próximos 7 dias para que o LLM resolva datas relativas sem erro."""
+    tz = ZoneInfo("America/Sao_Paulo")
+    now = datetime.now(tz)
+    dia_semana = _DIAS_PT[now.weekday()]
+    mes = _MESES_PT[now.month - 1]
+
+    # Próximos 7 dias com dia da semana
+    proximos = []
+    for i in range(1, 8):
+        d = now + timedelta(days=i)
+        proximos.append(
+            f"  {_DIAS_PT[d.weekday()]}: {d.strftime('%d/%m/%Y')}"
+        )
+    proximos_str = "\n".join(proximos)
+
+    return (
+        f"--- DATA E HORA ATUAL (Brasília / UTC-3) ---\n"
+        f"Hoje é {dia_semana}, {now.day} de {mes} de {now.year}.\n"
+        f"Hora atual: {now.strftime('%H:%M')} (BRT).\n"
+        f"Data ISO: {now.strftime('%Y-%m-%d')}\n\n"
+        f"PRÓXIMOS 7 DIAS (use para resolver 'amanhã', 'essa sexta', etc.):\n"
+        f"{proximos_str}\n\n"
+        f"REGRA OBRIGATÓRIA DE DATAS:\n"
+        f"- SEMPRE use as datas acima como referência. NUNCA invente ou adivinhe datas.\n"
+        f"- Ao chamar qualquer ferramenta de agendamento, converta SEMPRE para ISO 8601: "
+        f"YYYY-MM-DDTHH:MM:SS (ex: {now.strftime('%Y-%m-%d')}T09:00:00).\n"
+        f"- Se o cliente disser 'essa sexta', calcule a partir de hoje ({now.strftime('%d/%m/%Y')}).\n"
+    )
 
 
 # ===================================================================
@@ -342,7 +387,10 @@ def call_model(state: AgentState, config: RunnableConfig):
     persona = state.get("context_data", {}).get("persona", "Você é a Ana, assistente virtual da barbearia.")
     system_info = state.get("context_data", {}).get("system_info", {})
 
+    datetime_ctx = _get_datetime_context()
+
     system_message = SystemMessage(content=(
+        f"{datetime_ctx}\n"
         f"--- PERSONA ---\n{persona}\n\n"
         f"--- DADOS TÉCNICOS DA FILIAL ---\n{system_info}\n\n"
         "--- REGRAS DE OURO (MEMÓRIA E FLUXO) ---\n"
