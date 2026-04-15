@@ -521,11 +521,10 @@ def call_model(state: AgentState, config: RunnableConfig):
         f"--- DADOS TÉCNICOS DA FILIAL ---\n{system_info}\n\n"
         "=== FLUXO DE ATENDIMENTO (Priorize a agilidade e naturalidade) ===\n\n"
 
-        "ETAPA 1 — IDENTIFICAÇÃO E BOAS-VINDAS:\n"
+        "ETAPA 1 — IDENTIFICAÇÃO (Pular se já identificado):\n"
         f"- O telefone (WhatsApp) deste cliente é: {telefone_cliente}.\n"
-        "  - ATENÇÃO: Se o telefone acima contiver hifens ou letras (ex: b59d...), ele é um ID INTERNO e NÃO um telefone real. Ignore-o e trate o telefone como DESCONHECIDO até que o cliente informe.\n"
-        f"- REGRA DE OURO: No início, se o telefone for válido, chame 'buscar_cadastro_cliente' com o telefone {telefone_cliente}.\n"
-        "- **IMPORTANTE**: Se o cadastro não for encontrado, der erro ou o telefone for desconhecido, NÃO INSISTA. Diga: 'Não localizei seu cadastro, mas vamos focar no seu horário!' e PROSSIGA para a busca de horários.\n"
+        "- SE o cliente já estiver identificado no contexto (possuir ID de cliente), NÃO chame 'buscar_cadastro_cliente'. Vá direto para as Etapas 2 e 3.\n"
+        "- **FOCO DO TESTE**: O objetivo principal agora é validar a BUSCA DE HORÁRIOS e CRIAR AGENDAMENTO. Não perca tempo com cadastros se não for estritamente necessário.\n\n"
         "- Só peça dados de cadastro (Nome, CPF, etc) no FINAL, quando o cliente já tiver escolhido um horário e estiver PRONTO para confirmar o agendamento.\n"
         "- NUNCA mostre erros técnicos ou de endpoint. Se a busca falhar, siga o atendimento naturalmente.\n\n"
 
