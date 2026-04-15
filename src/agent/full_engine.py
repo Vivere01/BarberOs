@@ -210,7 +210,7 @@ async def buscar_disponibilidade(
         payload = dict(
             id_agenda=agenda_id,
             id_filial=id_filial,
-            periodo_inicial=data_inicio,
+            periodo_inicio=data_inicio,
             periodo_fim=data_fim,
             tamanho_janela_minutos=duracao_total_minutos,
             granularidade=15,
