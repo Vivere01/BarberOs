@@ -38,6 +38,7 @@ async def process_chat(request: ChatInput):
         inbox=request.inbox_do_cliente,
         contact_id=request.contact_id,
         conversation_id=request.conversation_id,
+        system_info=request.barbershop_context
     )
 
     input_state = {

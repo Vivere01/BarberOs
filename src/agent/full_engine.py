@@ -49,13 +49,15 @@ _session_ctx: ContextVar[dict] = ContextVar("chatwoot_session", default={})
 
 def set_session_context(inbox: Optional[str] = None,
                         contact_id: Optional[str] = None,
-                        conversation_id: Optional[str] = None):
+                        conversation_id: Optional[str] = None,
+                        system_info: Optional[dict] = None):
     """Chamado pelo endpoint /chat antes de invocar o brain.
     Usa ContextVar — safe para múltiplos usuários concorrentes."""
     _session_ctx.set({
         "inbox": inbox,
         "contact_id": contact_id,
         "conversation_id": conversation_id,
+        "system_info": system_info or {},
     })
 
 
