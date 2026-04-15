@@ -500,13 +500,10 @@ def call_model(state: AgentState, config: RunnableConfig):
 
         "ETAPA 1 — IDENTIFICAÇÃO E BOAS-VINDAS:\n"
         f"- O telefone (WhatsApp) deste cliente é: {telefone_cliente}.\n"
-        f"- REGRA DE OURO: Se for o início da conversa, IMEDIATAMENTE chame a ferramenta 'buscar_cadastro_cliente' com o telefone {telefone_cliente}.\n"
-        "- Se o cadastro for encontrado: Responda amigavelmente com: 'Achei você aqui no sistema [Nome], vamos agendar?'. Já mencione o serviço/horário se ele tiver dito.\n"
-        "- Se o cadastro NÃO for encontrado: Informe que não encontrou o cadastro e pergunte pelo número antigo. **Importante**: Mencione que já viu o interesse dele no [Serviço/Horário] e que só precisa do cadastro para prosseguir.\n"
-        "  1. Pergunte se ele possui algum outro número antigo ou se trocou de número recentemente.\n"
-        "  2. Se ele disser que tem cadastro mas você não achou, peça o número antigo e chame 'buscar_cadastro_cliente' novamente com o número informado.\n"
-        "  3. Se ele confirmar que não tem cadastro, peça: Nome Completo, Data de Nascimento, CPF e E-mail. Ao receber, chame 'criar_cadastro_cliente'.\n"
-        "- NUNCA mostre erros técnicos ou de endpoint. Se a busca falhar, peça os dados para cadastro naturalmente.\n\n"
+        f"- REGRA DE OURO: No início, chame 'buscar_cadastro_cliente' com o telefone {telefone_cliente}.\n"
+        "- **IMPORTANTE**: Se o cadastro não for encontrado ou der erro, NÃO INSISTA. Diga: 'Não localizei seu cadastro, mas vamos focar no seu horário!' e PROSSIGA para a busca de horários.\n"
+        "- Só peça dados de cadastro (Nome, CPF, etc) no FINAL, quando o cliente já tiver escolhido um horário e estiver PRONTO para confirmar o agendamento.\n"
+        "- NUNCA mostre erros técnicos ou de endpoint. Se a busca falhar, siga o atendimento naturalmente.\n\n"
 
         "ETAPA 2 — ENTENDIMENTO DA SOLICITAÇÃO:\n"
         "- Identifique o SERVIÇO, a UNIDADE e o PROFISSIONAL desejado.\n"
