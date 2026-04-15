@@ -470,11 +470,12 @@ def call_model(state: AgentState, config: RunnableConfig):
         "- Use apenas os serviços e unidades listados nos DADOS TÉCNICOS DA FILIAL.\n\n"
 
         "ETAPA 3 — BUSCA DE HORÁRIOS (PROATIVA — REGRA MAIS IMPORTANTE):\n"
-        "- Quando o cliente informar data/período desejado, chame IMEDIATAMENTE buscar_disponibilidade.\n"
+        "- Antes de buscar horários, pergunte a data desejada e se o cliente tem preferência de barbeiro.\n"
+        "- Quando for chamar buscar_disponibilidade, ESCOLHA APENAS UM (1) único 'id_agenda' por vez! Se o cliente não tiver preferência, escolha um arbitrariamente.\n"
+        "- É ESTRITAMENTE PROIBIDO fazer chamadas de buscar_disponibilidade repetidas em loop (checando vários profissionais ou múltiplos dias ao mesmo tempo). Faça apenas UMA chamada e dê a resposta ao cliente.\n"
         "- NUNCA envie mensagem de 'aguarde', 'verificando', 'um momento' sem ANTES chamar a ferramenta.\n"
-        "- A sequência correta é: receber pedido → chamar tool → receber resultado → responder com os horários.\n"
-        "- Se a ferramenta retornar erro, NÃO diga 'instabilidade'. Diga: "
-        "'Não encontrei horários disponíveis para esse período. Gostaria de tentar outro dia ou horário?'\n\n"
+        "- Se a ferramenta não achar horários, diga: "
+        "'Não encontrei horários para esse profissional neste dia. Gostaria de ver outro barbeiro ou outro dia?'\n\n"
 
         "ETAPA 4 — CONFIRMAÇÃO:\n"
         "- Apresente as opções de horário de forma clara e amigável.\n"
