@@ -50,6 +50,7 @@ _session_ctx: ContextVar[dict] = ContextVar("chatwoot_session", default={})
 def set_session_context(inbox: Optional[str] = None,
                         contact_id: Optional[str] = None,
                         conversation_id: Optional[str] = None,
+                        id_cliente_cashbarber: Optional[str] = None,
                         system_info: Optional[dict] = None):
     """Chamado pelo endpoint /chat antes de invocar o brain.
     Usa ContextVar — safe para múltiplos usuários concorrentes."""
@@ -57,6 +58,7 @@ def set_session_context(inbox: Optional[str] = None,
         "inbox": inbox,
         "contact_id": contact_id,
         "conversation_id": conversation_id,
+        "id_cliente_cashbarber": id_cliente_cashbarber,
         "system_info": system_info or {},
     })
 
@@ -534,7 +536,8 @@ def call_model(state: AgentState, config: RunnableConfig):
 
         "ETAPA 1 — IDENTIFICAÇÃO (Pular se já identificado):\n"
         f"- O telefone (WhatsApp) deste cliente é: {telefone_cliente}.\n"
-        "- SE o cliente já estiver identificado no contexto (possuir ID de cliente), NÃO chame 'buscar_cadastro_cliente'. Vá direto para as Etapas 2 e 3.\n"
+        f"- ID do Cliente CashBarber: {state.get('context_data', {}).get('id_cliente_cashbarber', 'NÃO INFORMADO')}.\n"
+        "- SE o cliente já possuir o ID acima ou estiver identificado no contexto, NÃO chame 'buscar_cadastro_cliente'.\n"
         "- **FOCO DO TESTE**: O objetivo principal agora é validar a BUSCA DE HORÁRIOS e CRIAR AGENDAMENTO. Não perca tempo com cadastros se não for estritamente necessário.\n\n"
         "- Só peça dados de cadastro (Nome, CPF, etc) no FINAL, quando o cliente já tiver escolhido um horário e estiver PRONTO para confirmar o agendamento.\n"
         "- NUNCA mostre erros técnicos ou de endpoint. Se a busca falhar, siga o atendimento naturalmente.\n\n"

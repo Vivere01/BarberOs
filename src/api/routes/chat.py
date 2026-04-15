@@ -25,6 +25,7 @@ class ChatInput(BaseModel):
     inbox_do_cliente: Optional[str] = None
     contact_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    id_cliente_cashbarber: Optional[str] = None
 
 
 @router.post("/chat")
@@ -41,6 +42,7 @@ async def process_chat(request: ChatInput):
         inbox=request.inbox_do_cliente,
         contact_id=request.contact_id,
         conversation_id=request.conversation_id,
+        id_cliente_cashbarber=request.id_cliente_cashbarber,
         system_info=request.barbershop_context
     )
 
@@ -52,6 +54,7 @@ async def process_chat(request: ChatInput):
             "inbox_do_cliente": request.inbox_do_cliente,
             "contact_id": request.contact_id,
             "conversation_id": request.conversation_id,
+            "id_cliente_cashbarber": request.id_cliente_cashbarber,
             "telefone_cliente": request.phone,
         },
         "needs_human": False
