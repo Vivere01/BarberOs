@@ -196,8 +196,12 @@ async def buscar_disponibilidade(
     else:
         agendas_para_buscar = [id_agenda]
 
+    # Segurança: NUNCA enviar zero para o N8N, ou ele rejeita a busca
+    if not duracao_total_minutos or int(duracao_total_minutos) <= 0:
+        duracao_total_minutos = 30
+        
     all_slots = []
-    logger.info(f"INICIANDO_BUSCA_COLETIVA: filial={id_filial}, profissionais_alvo={len(agendas_para_buscar)}")
+    logger.info(f"INICIANDO_BUSCA_COLETIVA: filial={id_filial}, profissionais_alvo={len(agendas_para_buscar)}, duracao={duracao_total_minutos}min")
 
     import asyncio
     
