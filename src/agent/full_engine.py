@@ -201,15 +201,16 @@ async def buscar_disponibilidade(
 
     for agenda_id in agendas_para_buscar:
         data = dict(
-            start=data_inicio,
-            end=data_fim,
             id_agenda=agenda_id,
             id_filial=id_filial,
-            duration=duracao_total_minutos,
-            inbox=ctx.get("inbox"),
+            start=data_inicio,
+            periodo_fim=data_fim,  # N8N espera periodo_fim
+            tamanho_janela_minutos=duracao_total_minutos,  # N8N espera tamanho_janela_minutos
+            granularidade=15,  # Padrão solicitado
+            amostras=amostras,
+            inbox_do_cliente=ctx.get("inbox"),  # N8N espera inbox_do_cliente
             contact_id=ctx.get("contact_id"),
             conversation_id=ctx.get("conversation_id"),
-            amostras=amostras,
         )
         try:
             res = await n8n.post("buscar_horarios", data)
