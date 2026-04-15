@@ -236,17 +236,15 @@ async def buscar_disponibilidade(
             logger.error(f"ERRO_AO_CONSULTAR_AGENDA {agenda_id}: {str(e)}")
             logger.error(f"FALHA_AO_BUSCAR_AGENDA_{agenda_id}: {e}")
 
-    # Remove duplicatas de horários (se dois barbeiros tiverem o mesmo horário livre) e ordena
-    unique_slots = []
-    seen_times = set()
-    for s in all_slots:
-        time_key = s.get("hora") or s.get("start")
-        if time_key not in seen_times:
-            unique_slots.append(s)
-            seen_times.add(time_key)
+    # Remove duplicatas e ordena
+    unique_slots = sorted(list(set(all_slots)))
 
     logger.info(f"RESULTADO_FINAL_BUSCA: total_vagas={len(unique_slots)}")
-    return {"status": "sucesso", "slots": sorted(unique_slots, key=lambda x: x.get("hora", ""))}
+    
+    if not unique_slots:
+        return "Não há horários disponíveis para o período e serviço solicitados."
+        
+    return "Horários disponíveis encontrados:\n" + "\n".join(unique_slots)
 
 
 @tool
