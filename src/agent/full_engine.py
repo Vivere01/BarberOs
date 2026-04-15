@@ -214,7 +214,7 @@ async def buscar_disponibilidade(
         )
         try:
             res = await n8n.post("buscar_horarios", data)
-            logger.debug(f"RESPOSTA_BRUTA_N8N (Agenda {agenda_id}): {res}")
+            logger.info(f"RESPOSTA_BRUTA_N8N (Agenda {agenda_id}): {res}")
             
             if isinstance(res, list):
                 for item in res:
@@ -374,8 +374,12 @@ async def cancelar_meu_agendamento(
 
 @tool
 async def buscar_cadastro_cliente(telefone: str):
-    """Busca se o cliente já existe na base de dados pelo telefone.
-    Retorna dados do cliente ou {"encontrado": false} se não existir."""
+    """Busca se o cliente já existe na base de dados pelo telefone (DDD + números)."""
+    # Proteção: verificar se não é um UUID/ID interno sendo passado como telefone
+    if not telefone or "-" in str(telefone) or len(str(telefone)) > 15:
+        logger.warning(f"BUSCA_CLIENTE_BLOQUEADA: '{telefone}' não é um telefone válido.")
+        return {"encontrado": False, "motivo": "telefone_invalido_ou_id_interno"}
+
     logger.info(f"TOOL_BUSCAR_CLIENTE: telefone={telefone}")
     try:
         result = await n8n.buscar_cliente(telefone)
@@ -519,8 +523,9 @@ def call_model(state: AgentState, config: RunnableConfig):
 
         "ETAPA 1 — IDENTIFICAÇÃO E BOAS-VINDAS:\n"
         f"- O telefone (WhatsApp) deste cliente é: {telefone_cliente}.\n"
-        f"- REGRA DE OURO: No início, chame 'buscar_cadastro_cliente' com o telefone {telefone_cliente}.\n"
-        "- **IMPORTANTE**: Se o cadastro não for encontrado ou der erro, NÃO INSISTA. Diga: 'Não localizei seu cadastro, mas vamos focar no seu horário!' e PROSSIGA para a busca de horários.\n"
+        "  - ATENÇÃO: Se o telefone acima contiver hifens ou letras (ex: b59d...), ele é um ID INTERNO e NÃO um telefone real. Ignore-o e trate o telefone como DESCONHECIDO até que o cliente informe.\n"
+        f"- REGRA DE OURO: No início, se o telefone for válido, chame 'buscar_cadastro_cliente' com o telefone {telefone_cliente}.\n"
+        "- **IMPORTANTE**: Se o cadastro não for encontrado, der erro ou o telefone for desconhecido, NÃO INSISTA. Diga: 'Não localizei seu cadastro, mas vamos focar no seu horário!' e PROSSIGA para a busca de horários.\n"
         "- Só peça dados de cadastro (Nome, CPF, etc) no FINAL, quando o cliente já tiver escolhido um horário e estiver PRONTO para confirmar o agendamento.\n"
         "- NUNCA mostre erros técnicos ou de endpoint. Se a busca falhar, siga o atendimento naturalmente.\n\n"
 
