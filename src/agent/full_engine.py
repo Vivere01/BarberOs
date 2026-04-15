@@ -446,6 +446,7 @@ def call_model(state: AgentState, config: RunnableConfig):
 
     persona = state.get("context_data", {}).get("persona", "Você é a Ana, assistente virtual da barbearia.")
     system_info = state.get("context_data", {}).get("system_info", {})
+    telefone_cliente = state.get("context_data", {}).get("telefone_cliente", "")
 
     datetime_ctx = _get_datetime_context()
 
@@ -457,12 +458,12 @@ def call_model(state: AgentState, config: RunnableConfig):
         "=== FLUXO DE ATENDIMENTO (siga EXATAMENTE esta ordem) ===\n\n"
 
         "ETAPA 1 — IDENTIFICAÇÃO DO CLIENTE:\n"
-        "- Ao primeiro contato, pergunte se o cliente já tem cadastro: 'Você já tem cadastro conosco?'\n"
-        "- Se SIM ou se fornecer o telefone: chame buscar_cadastro_cliente com o telefone.\n"
-        "- Se NÃO tem cadastro: peça nome completo, data de nascimento e telefone (whatsapp).\n"
-        "  Depois chame criar_cadastro_cliente com esses dados.\n"
-        "- NUNCA mostre erros de sistema ao cliente nesta etapa. Se a busca falhar, diga: "
-        "'Para agilizar seu atendimento, pode me informar seu nome completo e data de nascimento?'\n\n"
+        f"- O telefone (WhatsApp) deste cliente é: {telefone_cliente}.\n"
+        f"- IMPORTANTE: Na primeira mensagem do cliente, IMEDIATAMENTE chame a ferramenta 'buscar_cadastro_cliente' usando o telefone {telefone_cliente}. Nunca pergunte se ele tem cadastro!\n"
+        "- Se a ferramenta retornar que existe, o atenda amigavelmente informando seu nome se possível.\n"
+        "- Se a ferramenta retornar que NÃO existe (ou não encontrado), informe que precisa de alguns dados para cadastro: peça nome completo, data de nascimento, CPF e e-mail.\n"
+        "  Quando ele fornecer os dados, chame 'criar_cadastro_cliente'.\n"
+        "- NUNCA mostre erros de sistema ao cliente nesta etapa. Se a busca falhar, apenas siga o fluxo pedindo os dados para criar o cadastro.\n\n"
 
         "ETAPA 2 — IDENTIFICAÇÃO DO SERVIÇO E UNIDADE:\n"
         "- Pergunte qual serviço deseja e em qual unidade (se houver mais de uma).\n"

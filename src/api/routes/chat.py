@@ -48,6 +48,7 @@ async def process_chat(request: ChatInput):
             "inbox_do_cliente": request.inbox_do_cliente,
             "contact_id": request.contact_id,
             "conversation_id": request.conversation_id,
+            "telefone_cliente": request.phone,
         },
         "needs_human": False
     }
