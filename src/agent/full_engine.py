@@ -173,12 +173,26 @@ async def buscar_disponibilidade(
         sys_info = ctx.get("system_info", {})
         agendas_list = sys_info.get("agendas", [])
         
+        # Se não tem lista global de agendas, tenta extrair da filial selecionada
+        if not agendas_list and sys_info.get("filiais"):
+            for f in sys_info.get("filiais", []):
+                if str(f.get("id_filial")) == str(id_filial) or str(f.get("id")) == str(id_filial):
+                    agendas_list = f.get("profissionais", [])
+                    break
+        
         if not agendas_list:
-            logger.warning(f"SYSTEM_INFO_SEM_AGENDAS: O N8N não enviou a lista de profissionais. SystemInfo recebido: {sys_info}")
-            # Fallback: Tenta buscar sem ID de agenda (alguns sistemas aceitam busca global por filial)
+            logger.warning(f"SYSTEM_INFO_VAZIO: Não encontramos profissionais para a filial {id_filial}. SystemInfo: {list(sys_info.keys())}")
             agendas_para_buscar = [None]
         else:
-            agendas_para_buscar = [str(a.get("id")) for a in agendas_list if a.get("id")]
+            # Tenta pegar 'id_agenda' ou 'id'
+            agendas_para_buscar = []
+            for a in agendas_list:
+                id_val = a.get("id_agenda") or a.get("id")
+                if id_val:
+                    agendas_para_buscar.append(str(id_val))
+            
+            if not agendas_para_buscar:
+                agendas_para_buscar = [None]
     else:
         agendas_para_buscar = [id_agenda]
 
