@@ -19,7 +19,7 @@ class N8NWebhookClient:
             self._client = httpx.AsyncClient(timeout=15.0) # Aumentado timeout para 15s
         return self._client
 
-    async def _post(self, endpoint: str, data: dict) -> dict:
+    async def post(self, endpoint: str, data: dict) -> dict:
         url = f"{self.base_url}/{endpoint}"
         logger.debug(f"CHAMANDO_WEBHOOK: {url}")
         
@@ -61,7 +61,7 @@ class N8NWebhookClient:
         }
         # Remove chaves com None para evitar confusão no N8N se necessário
         data = {k: v for k, v in data.items() if v is not None}
-        return await self._post("buscar_horarios", data)
+        return await self.post("buscar_horarios", data)
 
     async def criar_agendamento(self, start: str, duration: int, title: str, desc: str, 
                                id_agenda: Any, services: List[Any], id_filial: Any,
@@ -81,7 +81,7 @@ class N8NWebhookClient:
             "conversation_id": conversation_id
         }
         data = {k: v for k, v in data.items() if v is not None}
-        return await self._post("criar_agendamento", data)
+        return await self.post("criar_agendamento", data)
 
     async def buscar_agendamento_contato(self, start: str, end: str, id_agenda: Any, id_filial: Any,
                                        id_cliente: Optional[str] = None, inbox: Optional[str] = None,
@@ -96,7 +96,7 @@ class N8NWebhookClient:
             "inbox_do_cliente": inbox
         }
         data = {k: v for k, v in data.items() if v is not None}
-        return await self._post("buscar_agendamento_contato", data)
+        return await self.post("buscar_agendamento_contato", data)
 
     async def desmarcar_agendamento(self, phone: str, message: str, id_agenda: Any, id_evento: str,
                                    inbox: Optional[str] = None, contact_id: Optional[str] = None,
@@ -111,7 +111,7 @@ class N8NWebhookClient:
             "conversation_id": conversation_id
         }
         data = {k: v for k, v in data.items() if v is not None}
-        return await self._post("desmarcar_agendamento", data)
+        return await self.post("desmarcar_agendamento", data)
 
     async def cancelar_agendamento(self, *args, **kwargs):
         """Legacy alias para desmarcar_agendamento"""
@@ -119,7 +119,7 @@ class N8NWebhookClient:
 
     async def buscar_cliente(self, phone: str):
         data = {"telefone": phone}
-        return await self._post("buscar_cadastro_cliente", data)
+        return await self.post("buscar_cadastro_cliente", data)
 
     async def criar_cliente(self, phone: str, name: str, email: Optional[str] = None):
         data = {
@@ -127,4 +127,4 @@ class N8NWebhookClient:
             "nome": name,
             "email": email
         }
-        return await self._post("criar_cadastro_cliente", data)
+        return await self.post("criar_cadastro_cliente", data)
