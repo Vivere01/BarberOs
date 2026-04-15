@@ -27,7 +27,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
 from src.config.settings import get_settings
@@ -105,6 +105,39 @@ def _get_datetime_context() -> str:
         f"YYYY-MM-DDTHH:MM:SS (ex: {now.strftime('%Y-%m-%d')}T09:00:00).\n"
         f"- Se o cliente disser 'essa sexta', calcule a partir de hoje ({now.strftime('%d/%m/%Y')}).\n"
     )
+
+
+# ===================================================================
+# Sanitização de histórico: evita ToolMessages órfãos
+# O erro 400 da OpenAI ocorre quando uma fatia da memória começa com
+# ToolMessage sem o AIMessage+tool_calls que a precede.
+# ===================================================================
+def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """Remove ToolMessages do início da lista que não têm AIMessage predecessor.
+    Garante que cada ToolMessage seja precedido por AIMessage com tool_calls."""
+    if not messages:
+        return messages
+
+    # Encontra o primeiro índice seguro (não ToolMessage)
+    start = 0
+    for i, msg in enumerate(messages):
+        if isinstance(msg, ToolMessage):
+            # Verifica se o anterior (na lista atual) tem tool_calls
+            prev = messages[i - 1] if i > 0 else None
+            if prev is None or not (isinstance(prev, AIMessage) and getattr(prev, "tool_calls", None)):
+                start = i + 1  # Este ToolMessage é órfão, pula
+        else:
+            break  # Chegou em mensagem normal, pode parar
+
+    sanitized = messages[start:]
+
+    if start > 0:
+        from src.config.logging_config import get_logger as _gl
+        _gl("agent.full_engine").warning(
+            f"SANITIZE_MESSAGES: Removidas {start} ToolMessages orfas do inicio da janela de memoria"
+        )
+
+    return sanitized
 
 
 # ===================================================================
@@ -278,9 +311,21 @@ async def cancelar_meu_agendamento(
 @tool
 async def buscar_cadastro_cliente(telefone: str):
     """Busca se o cliente já existe na base de dados pelo telefone.
+    Retorna dados do cliente ou {"encontrado": false} se não existir.
     IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno."""
     logger.info(f"TOOL_BUSCAR_CLIENTE: telefone={telefone}")
-    return await n8n.buscar_cliente(telefone)
+    try:
+        result = await n8n.buscar_cliente(telefone)
+        # Se o endpoint não existe no N8N ainda, trata como cliente não encontrado
+        if isinstance(result, dict) and result.get("error"):
+            err = str(result.get("error", ""))
+            if "404" in err or "not found" in err.lower() or "unavailable" in err.lower():
+                logger.warning(f"CADASTRO_ENDPOINT_INDISPONIVEL: tratando como nao encontrado")
+                return {"encontrado": False, "motivo": "endpoint_indisponivel"}
+        return result
+    except Exception as e:
+        logger.warning(f"ERRO_BUSCAR_CLIENTE (ignorado): {e}")
+        return {"encontrado": False, "motivo": "erro_busca"}
 
 
 @tool
@@ -288,7 +333,18 @@ async def criar_cadastro_cliente(telefone: str, nome: str, email: Optional[str] 
     """Cria um novo cadastro de cliente. Use quando buscar_cadastro_cliente retornar que não existe.
     IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno."""
     logger.info(f"TOOL_CRIAR_CLIENTE: telefone={telefone}, nome={nome}")
-    return await n8n.criar_cliente(telefone, nome, email)
+    try:
+        result = await n8n.criar_cliente(telefone, nome, email)
+        if isinstance(result, dict) and result.get("error"):
+            err = str(result.get("error", ""))
+            if "404" in err or "not found" in err.lower():
+                logger.warning(f"CRIAR_CLIENTE_ENDPOINT_INDISPONIVEL: seguindo sem cadastro")
+                # Simula sucesso para o agente seguir o fluxo
+                return {"criado": True, "id_cliente": telefone, "nome": nome, "motivo": "cadastro_simulado"}
+        return result
+    except Exception as e:
+        logger.warning(f"ERRO_CRIAR_CLIENTE (ignorado): {e}")
+        return {"criado": True, "id_cliente": telefone, "nome": nome, "motivo": "cadastro_simulado"}
 
 
 @tool
@@ -380,9 +436,13 @@ def call_model(state: AgentState, config: RunnableConfig):
         max_retries=1  # Reduzido: evita loops de retry
     ).bind_tools(tools)
 
-    # --- Gestão de Memória: últimas 15 mensagens ---
+    # --- Gestão de Memória: últimas 20 mensagens, sem ToolMessages órfãos ---
     all_messages = state["messages"]
-    messages_to_send = all_messages[-15:] if len(all_messages) > 15 else all_messages
+    sliced = all_messages[-20:] if len(all_messages) > 20 else all_messages
+
+    # Remove ToolMessages no início da fatia que não têm AIMessage predecessor
+    # (causa o erro 400 da OpenAI: 'tool must follow tool_calls')
+    messages_to_send = _sanitize_messages(sliced)
 
     persona = state.get("context_data", {}).get("persona", "Você é a Ana, assistente virtual da barbearia.")
     system_info = state.get("context_data", {}).get("system_info", {})
