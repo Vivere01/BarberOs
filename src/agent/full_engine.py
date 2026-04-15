@@ -148,75 +148,68 @@ def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
 async def buscar_disponibilidade(
     data_inicio: str,
     data_fim: str,
-    id_agenda: str,
     id_filial: str,
-    duracao_total_minutos: int,
+    id_agenda: str = None,
+    duracao_total_minutos: int = 30,
     amostras: int = 5
 ):
     """
-    Busca horários livres no sistema de agendamento.
-    Use quando o cliente perguntar 'tem horário para amanhã?'
-    ou 'quais horários você tem?'.
-    IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno.
-
+    Busca horários disponíveis para agendamento.
+    IMPORTANTE: Se o cliente NÃO especificou um barbeiro, deixe 'id_agenda' como None para buscar em toda a equipe.
+    
     Parâmetros:
     - data_inicio: Data/hora de início da busca (ISO 8601, ex: 2025-06-10T09:00:00)
     - data_fim: Data/hora de fim da busca (ISO 8601, ex: 2025-06-10T18:00:00)
-    - id_agenda: ID da agenda do profissional (string)
-    - id_filial: ID da filial (string)
+    - id_filial: ID da unidade (fornecido nos dados técnicos)
+    - id_agenda: ID do profissional específico (Opcional)
     - duracao_total_minutos: Duração do serviço em minutos (ex: 30)
     - amostras: Quantidade de sugestões de horário (padrão: 5)
     """
     ctx = _ctx()
-    logger.info(f"TOOL_BUSCAR_HORARIOS: agenda={id_agenda}, filial={id_filial}, inicio={data_inicio}")
-    
-    agendas_para_buscar = [id_agenda] if id_agenda else []
-    
-    # Se não informou agenda, busca em todas as disponíveis no sistema_info
+    # Se não informou agenda, busca em TODAS as disponíveis no sistema_info para essa filial
     if not id_agenda:
         sys_info = ctx.get("system_info", {})
+        # Filtra agendas que pertencem a esta filial (ou todas se não houver filtro)
         agendas_para_buscar = [str(a.get("id")) for a in sys_info.get("agendas", []) if a.get("id")]
+    else:
+        agendas_para_buscar = [id_agenda]
 
     all_slots = []
+    logger.info(f"INICIANDO_BUSCA_COLETIVA: filial={id_filial}, profissionais={len(agendas_para_buscar)}")
+
     for agenda_id in agendas_para_buscar:
-        logger.info(f"BUSCANDO_HORARIOS_INTERNO: agenda={agenda_id}")
         data = dict(
-            data_inicio=data_inicio,
-            data_fim=data_fim,
-            id_filial=id_filial,
+            start=data_inicio,
+            end=data_fim,
             id_agenda=agenda_id,
-            barbershop_id=ctx.get("barbershop_id"),
+            id_filial=id_filial,
+            duration=duracao_total_minutos,
+            inbox=ctx.get("inbox"),
+            contact_id=ctx.get("contact_id"),
             conversation_id=ctx.get("conversation_id"),
             amostras=amostras,
         )
         try:
-            res = await n8n.buscar_horarios(
-                start=data_inicio,
-                end=data_fim,
-                id_agenda=agenda_id,
-                id_filial=id_filial,
-                duration=duracao_total_minutos,
-                inbox=ctx.get("inbox"),
-                contact_id=ctx.get("contact_id"),
-                conversation_id=ctx.get("conversation_id"),
-                amostras=amostras,
-            )
+            res = await n8n.buscar_horarios(**data)
             if res.get("status") == "sucesso" and res.get("slots"):
-                # Adiciona informação de qual agenda é esse slot para uso interno
-                for slot in res.get("slots"):
-                    slot["id_agenda_interno"] = agenda_id
+                # Adiciona slots e continua para os outros profissionais para ter a lista COMPLETA
+                for s in res.get("slots"):
+                    s["barbeiro_id"] = agenda_id
                 all_slots.extend(res.get("slots"))
-                # Se encontrou horários para este barbeiro, já podemos retornar para ser mais rápido
-                if all_slots: break 
         except Exception as e:
-            logger.error(f"ERRO_BUSCA_AGENDA_{agenda_id}: {e}")
-            continue
+            logger.error(f"FALHA_AO_BUSCAR_AGENDA_{agenda_id}: {e}")
 
-    logger.info(f"RESULTADO_FINAL_BUSCA: slots_encontrados={len(all_slots)}")
-    if not all_slots:
-        return {"status": "sucesso", "slots": [], "mensagem": "Não há horários disponíveis para este período."}
-    
-    return {"status": "sucesso", "slots": all_slots}
+    # Remove duplicatas de horários (se dois barbeiros tiverem o mesmo horário livre) e ordena
+    unique_slots = []
+    seen_times = set()
+    for s in all_slots:
+        time_key = s.get("hora") or s.get("start")
+        if time_key not in seen_times:
+            unique_slots.append(s)
+            seen_times.add(time_key)
+
+    logger.info(f"RESULTADO_FINAL_BUSCA: total_vagas={len(unique_slots)}")
+    return {"status": "sucesso", "slots": sorted(unique_slots, key=lambda x: x.get("hora", ""))}
 
 
 @tool
@@ -233,7 +226,6 @@ async def realizar_agendamento(
     """
     Cria um agendamento real no sistema. Use APENAS quando o cliente
     confirmar o interesse e você já tiver todos os dados necessários.
-    IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno.
 
     Parâmetros:
     - data_inicio: Data/hora de início do agendamento (ISO 8601)
@@ -279,7 +271,6 @@ async def consultar_meu_agendamento(
     """
     Consulta se o cliente já tem algo marcado em um período.
     Use para verificar agendamentos existentes antes de remarcar ou cancelar.
-    IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno.
 
     Parâmetros:
     - data_inicio: Início do período de busca (ISO 8601)
@@ -316,7 +307,6 @@ async def cancelar_meu_agendamento(
     """
     Cancela (desmarca) um agendamento existente e envia alerta ao cliente.
     Sempre confirme com o cliente antes de executar esta ação.
-    IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno.
 
     Parâmetros:
     - telefone: Telefone do cliente (ex: 5511999999999)
@@ -344,8 +334,7 @@ async def cancelar_meu_agendamento(
 @tool
 async def buscar_cadastro_cliente(telefone: str):
     """Busca se o cliente já existe na base de dados pelo telefone.
-    Retorna dados do cliente ou {"encontrado": false} se não existir.
-    IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno."""
+    Retorna dados do cliente ou {"encontrado": false} se não existir."""
     logger.info(f"TOOL_BUSCAR_CLIENTE: telefone={telefone}")
     try:
         result = await n8n.buscar_cliente(telefone)
@@ -363,8 +352,7 @@ async def buscar_cadastro_cliente(telefone: str):
 
 @tool
 async def criar_cadastro_cliente(telefone: str, nome: str, email: Optional[str] = None):
-    """Cria um novo cadastro de cliente. Use quando buscar_cadastro_cliente retornar que não existe.
-    IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno."""
+    """Cria um novo cadastro de cliente. Use quando buscar_cadastro_cliente retornar que não existe."""
     logger.info(f"TOOL_CRIAR_CLIENTE: telefone={telefone}, nome={nome}")
     try:
         result = await n8n.criar_cliente(telefone, nome, email)
@@ -395,7 +383,6 @@ async def remarcar_agendamento(
     """
     Remarca um agendamento existente. Cancela o antigo e cria um novo.
     Use quando o cliente quiser trocar dia ou horário.
-    IMPORTANTE: Chame esta ferramenta APENAS UMA VEZ por turno.
     """
     ctx = _ctx()
     logger.info(f"TOOL_REMARCAR_AGENDAMENTO: evento_antigo={id_evento_antigo}, nova_data={nova_data_inicio}")
@@ -548,12 +535,7 @@ def call_model(state: AgentState, config: RunnableConfig):
     content_lower = response.content.lower() if response.content else ""
 
     if response.tool_calls:
-        # Garante que apenas 1 tool call seja executada por turno
-        if len(response.tool_calls) > 1:
-            logger.warning(f"LLM_DOUBLE_TOOL_CALL: {[tc['name'] for tc in response.tool_calls]} — truncando para 1")
-            # Mantém apenas o primeiro tool call
-            response.tool_calls = response.tool_calls[:1]
-            response.additional_kwargs["tool_calls"] = response.additional_kwargs.get("tool_calls", [])[:1]
+        # Mantém todas as chamadas para permitir busca paralela/múltipla se necessário
         intent = response.tool_calls[0]["name"]
         logger.info(f"AGENTE_ACAO: {intent}")
     elif "horário" in content_lower or "agenda" in content_lower or "disponível" in content_lower:
