@@ -199,43 +199,50 @@ async def buscar_disponibilidade(
     all_slots = []
     logger.info(f"INICIANDO_BUSCA_COLETIVA: filial={id_filial}, profissionais_alvo={len(agendas_para_buscar)}")
 
+    import asyncio
+    
+    tasks = []
     for agenda_id in agendas_para_buscar:
-        data = dict(
+        payload = dict(
             id_agenda=agenda_id,
             id_filial=id_filial,
             start=data_inicio,
-            periodo_fim=data_fim,  # N8N espera periodo_fim
-            tamanho_janela_minutos=duracao_total_minutos,  # N8N espera tamanho_janela_minutos
-            granularidade=15,  # Padrão solicitado
+            periodo_fim=data_fim,
+            tamanho_janela_minutos=duracao_total_minutos,
+            granularidade=15,
             amostras=amostras,
-            inbox_do_cliente=ctx.get("inbox"),  # N8N espera inbox_do_cliente
+            inbox_do_cliente=ctx.get("inbox"),
             contact_id=ctx.get("contact_id"),
             conversation_id=ctx.get("conversation_id"),
         )
-        try:
-            res = await n8n.post("buscar_horarios", data)
-            logger.info(f"RESPOSTA_BRUTA_N8N (Agenda {agenda_id}): {res}")
+        tasks.append(n8n.post("buscar_horarios", payload))
+
+    logger.info(f"DISPARANDO_BUSCAS_PARALELAS: {len(tasks)} profissionais")
+    
+    # Aguarda todas as respostas simultaneamente
+    responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, res in enumerate(responses):
+        agenda_id = agendas_para_buscar[i]
+        if isinstance(res, Exception):
+            logger.error(f"ERRO_AO_CONSULTAR_AGENDA {agenda_id}: {str(res)}")
+            continue
             
-            if isinstance(res, list):
-                for item in res:
-                    if isinstance(item, dict) and item.get("data"):
-                        slots = item.get("horarios", [])
-                        for s in slots:
-                            # Formata: "HH:MM (Profissional)"
-                            barbeiros = s.get("barbeiros", [])
-                            nome_b = barbeiros[0].get("nome") if barbeiros else "Disponível"
-                            slot_text = f"{s.get('inicio')} ({nome_b})"
-                            all_slots.append(slot_text)
-            elif isinstance(res, dict) and res.get("horarios"):
-                # Caso venha um objeto único em vez de lista
-                for s in res.get("horarios", []):
-                    barbeiros = s.get("barbeiros", [])
-                    nome_b = barbeiros[0].get("nome") if barbeiros else "Disponível"
-                    all_slots.append(f"{s.get('inicio')} ({nome_b})")
-                    
-        except Exception as e:
-            logger.error(f"ERRO_AO_CONSULTAR_AGENDA {agenda_id}: {str(e)}")
-            logger.error(f"FALHA_AO_BUSCAR_AGENDA_{agenda_id}: {e}")
+        logger.info(f"RESPOSTA_BRUTA_N8N (Agenda {agenda_id}): {res}")
+        
+        if isinstance(res, list):
+            for item in res:
+                if isinstance(item, dict) and item.get("data"):
+                    slots = item.get("horarios", [])
+                    for s in slots:
+                        barbeiros = s.get("barbeiros", [])
+                        nome_b = barbeiros[0].get("nome") if barbeiros else "Disponível"
+                        all_slots.append(f"{s.get('inicio')} ({nome_b})")
+        elif isinstance(res, dict) and res.get("horarios"):
+            for s in res.get("horarios", []):
+                barbeiros = s.get("barbeiros", [])
+                nome_b = barbeiros[0].get("nome") if barbeiros else "Disponível"
+                all_slots.append(f"{s.get('inicio')} ({nome_b})")
 
     # Remove duplicatas e ordena
     unique_slots = sorted(list(set(all_slots)))
