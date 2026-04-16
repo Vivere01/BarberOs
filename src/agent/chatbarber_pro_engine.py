@@ -136,11 +136,27 @@ class AgentState(TypedDict):
     context_data: dict
 
 def call_model(state: AgentState):
-    llm = ChatGroq(
-        model="llama-3.3-70b-versatile",
-        temperature=0,
-        groq_api_key=GROQ_API_KEY
-    ).bind_tools(tools)
+    settings = get_settings()
+    
+    # Prioriza OpenAI, mas aceita Groq como fallback se necessário
+    if settings.OPENAI_API_KEY:
+        from langchain_openai import ChatOpenAI
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0,
+            openai_api_key=settings.OPENAI_API_KEY
+        )
+        logger.info("PRO_BRAIN: Usando motor OpenAI (GPT-4o-mini)")
+    else:
+        from langchain_groq import ChatGroq
+        llm = ChatGroq(
+            model="llama-3.3-70b-versatile",
+            temperature=0,
+            groq_api_key=settings.GROQ_API_KEY
+        )
+        logger.info("PRO_BRAIN: Usando motor Groq (Llama-3.3-70b)")
+    
+    llm = llm.bind_tools(tools)
     
     # Carrega persona do arquivo para facilitar manutenção
     try:

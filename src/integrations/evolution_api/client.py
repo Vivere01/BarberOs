@@ -16,20 +16,30 @@ class EvolutionApiClient:
 
     async def send_text(self, number: str, text: str) -> Dict[str, Any]:
         """Envia mensagem de texto via Evolution API."""
-        # Limpa o número (remove @s.whatsapp.net se houver, o Evolution cuida disso ou espera o JID)
-        url = f"{self.base_url}/message/sendText/{self.instance_name}"
+        # Tenta o endpoint padrão e o alternativo
+        endpoints = [
+            f"{self.base_url}/message/sendText/{self.instance_name}",
+            f"{self.base_url}/messages/sendText/{self.instance_name}",
+            f"{self.base_url}/message/sendDirectText/{self.instance_name}"
+        ]
         
-        payload = {
-            "number": number,
-            "text": text,
-            "linkPreview": True
-        }
-        
-        async with httpx.AsyncClient() as client:
+        last_error = ""
+        for url in endpoints:
             try:
-                response = await client.post(url, headers=self.headers, json=payload)
-                response.raise_for_status()
-                return response.json()
+                payload = {
+                    "number": number.split("@")[0], # Remove @s.whatsapp.net se estiver lá para garantir compatibilidade
+                    "text": text,
+                    "linkPreview": False
+                }
+                headers = {"apikey": self.api_key, "Content-Type": "application/json"}
+                
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(url, json=payload, headers=headers)
+                    if response.status_code in [200, 201]:
+                        return response.json()
+                    last_error = f"Status {response.status_code} em {url}"
             except Exception as e:
-                logger.error(f"Erro ao enviar mensagem via Evolution: {e}")
-                return {"error": str(e)}
+                last_error = str(e)
+        
+        print(f"EVOLUTION_SEND_ERROR: Falha após tentar múltiplos caminhos: {last_error}")
+        return None

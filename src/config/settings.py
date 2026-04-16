@@ -61,8 +61,9 @@ class Settings(BaseSettings):
     # --- Sentry ---
     sentry_dsn: Optional[str] = Field(default=None)
 
-    # --- Groq ---
-    groq_api_key: str = Field(default="")
+    # AI API Keys
+    GROQ_API_KEY: str = Field(default="")
+    OPENAI_API_KEY: str = Field(default="")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
 
     # --- Evolution API ---

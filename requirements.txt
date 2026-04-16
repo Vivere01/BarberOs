@@ -11,4 +11,6 @@ playwright
 loguru
 structlog
 langchain-groq
+langchain-openai
 groq
+openai
