@@ -155,10 +155,20 @@ def call_model(state: AgentState):
         "--- INSTRUÇÕES ADICIONAIS ---\n"
         "- Use as ferramentas disponíveis para consultar dados reais."
     ))
+
+    # Trima o histórico para as últimas 10 mensagens para evitar context_length_exceeded
+    history = state["messages"][-10:]
+    messages = [system_msg] + history
     
-    messages = [system_msg] + state["messages"]
-    response = llm.invoke(messages)
-    return {"messages": [response]}
+    logger.info(f"GROQ_CALL: Thread={state.get('context_data', {}).get('telefone_cliente')}, MsgCount={len(messages)}")
+    
+    try:
+        response = llm.invoke(messages)
+        return {"messages": [response]}
+    except Exception as e:
+        logger.error(f"GROQ_INVOKE_ERROR: {str(e)}")
+        # Retorna uma mensagem de erro amigável se o Groq falhar
+        return {"messages": [AIMessage(content="Desculpe, tive um problema técnico momentâneo. Pode repetir?")]}
 
 def should_continue(state: AgentState):
     last_message = state["messages"][-1]
