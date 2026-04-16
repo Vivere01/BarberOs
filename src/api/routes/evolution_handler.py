@@ -50,6 +50,22 @@ async def handle_evolution_webhook(
         message.get("extendedTextMessage", {}).get("text")
     )
     
+    # Tratamento de Áudio
+    message_type = message_data.get("messageType", "")
+    if "audio" in message_type.lower() or message.get("audioMessage"):
+        audio_info = message.get("audioMessage", {})
+        base64_audio = message_data.get("base64") or audio_info.get("base64")
+        
+        if base64_audio:
+            logger.info("EVOLUTION_IN: Recebido áudio base64. Iniciando transcrição...")
+            from src.agent.chatbarber_pro_engine import transcribe_audio
+            text = await transcribe_audio(base64_audio)
+            logger.info(f"EVOLUTION_AUDIO_TRANSCRITO: {text}")
+        else:
+            logger.warning("EVOLUTION_IN: Áudio recebido, mas sem base64 habilitado no Webhook da Evolution.")
+            # Responde pedindo texto se falhar
+            text = "Enviou um áudio, mas meu sistema de transcrição não conseguiu ler. Pode escrever, por favor?"
+
     if not text:
         return {"status": "ignored", "reason": "no_text_content"}
 
