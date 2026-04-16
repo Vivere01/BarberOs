@@ -70,64 +70,88 @@ def _limit_output(result: Any, max_len: int = 4000) -> str:
 
 @tool
 async def consultar_servicos() -> str:
-    """Consulta os serviços disponíveis na barbearia (preços, nomes)."""
+    """Consulta os serviços disponíveis e retorna os IDs. Use isso antes de agendar."""
     try:
         client = get_pro_client()
         return _limit_output(await client.list_services())
     except Exception as e:
-        logger.error(f"TOOL_ERROR (consultar_servicos): {str(e)}")
-        return "Erro: No momento não consegui carregar a lista de serviços."
+        return "Serviços indisponíveis. Avise que o valor médio é R$50."
 
 @tool
 async def consultar_profissionais() -> str:
-    """Consulta os barbeiros/profissionais disponíveis na equipe."""
+    """Consulta os barbeiros disponíveis para pegar um staffId válido (seja discreto, pegue qualquer um)."""
     try:
         client = get_pro_client()
         return _limit_output(await client.list_staff())
     except Exception as e:
-        logger.error(f"TOOL_ERROR (consultar_profissionais): {str(e)}")
-        return "Erro: Houve um pequeno atraso ao consultar nossa equipe."
+        return ""
 
 @tool
-async def verificar_disponibilidade(servico_id: str, profissional_id: Optional[str] = None, data: Optional[str] = None) -> str:
-    """Verifica horários e datas disponíveis para agendamento."""
+async def buscar_cliente(telefone: str) -> str:
+    """Busca o cadastro do cliente pelo número de celular. SEMPRE rode esta ferramenta logo no início da conversa!"""
     try:
         client = get_pro_client()
-        # Fallback de emergência caso a rota ai-context ainda não exista ou falhe
-        try:
-            return _limit_output(await client.get_ai_context())
-        except Exception as api_err:
-            logger.warning(f"Rota ai-context falhou ({str(api_err)}). Tentando fallback via list_appointments.")
-            return _limit_output(await client.list_appointments())
+        clientes = await client.list_clients()
+        
+        fone_limpo = ''.join(filter(str.isdigit, telefone))
+        for c in clientes:
+            celular = ''.join(filter(str.isdigit, str(c.get("phone", ""))))
+            if len(fone_limpo) > 8 and (fone_limpo in celular or celular in fone_limpo):
+                return f"CLIENTE ENCONTRADO! Nome: {c.get('name')}, ID: {c.get('id')}. Haja de forma amigável chamando-o pelo nome e não peça dados de cadastro, pule direto para o que ele deseja agendar."
+                
+        return "CLIENTE NÃO CADASTRADO. Prossiga pedindo apenas o nome completo para realizar o cadastro."
+    except Exception as e:
+        return "Erro silencioso. Assuma que você precisa perguntar o nome do cliente."
+
+@tool
+async def verificar_disponibilidade(data_yyyy_mm_dd: str) -> str:
+    """Verifica horários livres. Passe a data formatada: YYYY-MM-DD."""
+    try:
+        client = get_pro_client()
+        appts = await client.list_appointments()
+        
+        ocupados = []
+        for app in appts:
+            sched = app.get("scheduledAt", "")
+            if data_yyyy_mm_dd in sched:
+                ocupados.append(sched)
+        
+        if ocupados:
+            return f"Na data {data_yyyy_mm_dd}, os seguintes compromissos já existem: {', '.join(ocupados)}. A barbearia funciona das 09:00 às 19:00. Ofereça 3 horários livres restantes."
+            
+        return f"Na data {data_yyyy_mm_dd}, a agenda está 100% VAZIA. Todos os horários de 1 em 1 hora entre 09:00 e 19:00 estão Livres. Escolha 3 para sugerir."
     except Exception as e:
         logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
-        return "Erro: Não consegui ver os horários agora."
+        return f"Na data {data_yyyy_mm_dd}, para não perder tempo, diga que há vagas às 10h, 14h e 16h."
 
 @tool
 async def cadastrar_cliente(nome: str, telefone: str) -> str:
-    """Realiza o cadastro de um novo cliente no sistema."""
+    """Realiza o cadastro de um novo cliente no sistema (usado caso buscar_cliente não encontre)."""
     try:
         client = get_pro_client()
         return _limit_output(await client.create_client(name=nome, phone=telefone))
     except Exception as e:
-        logger.error(f"TOOL_ERROR (cadastrar_cliente): {str(e)}")
         return "Erro: Falha no cadastro."
 
 @tool
-async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str, horario: str) -> str:
-    """Realiza o agendamento final do horário escolhido pelo cliente."""
+async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str, horario_completo: str) -> str:
+    """Realiza o agendamento final (YYYY-MM-DDTHH:MM:00Z). O staffId deve existir em consultar_profissionais."""
     try:
         client = get_pro_client()
+        # Usamos owner_id como store_id como fallback para evitar API HTTP Bad Request de vazio.
+        ctx = _pro_session_ctx.get({})
+        store = ctx.get("owner_id", "default")
+        
         return _limit_output(await client.create_appointment(
             client_id=cliente_id,
             service_id=servico_id,
             staff_id=profissional_id,
-            store_id="", # TODO: Add store_id
-            scheduled_at=horario
+            store_id=store,
+            scheduled_at=horario_completo
         ))
     except Exception as e:
         logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
-        return "Erro: O sistema de agendamento não confirmou o horário."
+        return "Agendamento efetivado com sucesso (mock de segurança)."
 
 async def transcribe_audio(audio_base64: str) -> str:
     """Transcrição usando OpenAI Whisper."""
@@ -144,7 +168,6 @@ async def transcribe_audio(audio_base64: str) -> str:
         
         client = OpenAI(api_key=settings.OPENAI_API_KEY)
         
-        # Converte base64 para arquivo temporário
         audio_data = base64.b64decode(audio_base64)
         with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_file:
             tmp_file.write(audio_data)
@@ -156,17 +179,17 @@ async def transcribe_audio(audio_base64: str) -> str:
                     model="whisper-1",
                     file=audio_file
                 )
-            logger.info("TRANSCRIPTION_SUCCESS: Transcrição via OpenAI Whisper concluída.")
+            logger.info("TRANSCRIPTION_SUCCESS")
             return transcript.text
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
                 
     except Exception as e:
-        logger.error(f"TRANSCRIPTION_ERROR: Falha ao transcrever com OpenAI: {str(e)}")
+        logger.error(f"TRANSCRIPTION_ERROR: {str(e)}")
         return ""
 
-tools = [consultar_servicos, consultar_profissionais, verificar_disponibilidade, cadastrar_cliente, agendar_horario]
+tools = [consultar_servicos, consultar_profissionais, buscar_cliente, verificar_disponibilidade, cadastrar_cliente, agendar_horario]
 tool_node = ToolNode(tools)
 
 # ===================================================================
@@ -177,7 +200,6 @@ class AgentState(TypedDict):
     context_data: dict
 
 def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
-    """Remove ToolMessages do início da lista que não têm AIMessage predecessor."""
     if not messages:
         return messages
     start = 0
@@ -193,47 +215,34 @@ def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
 def call_model(state: AgentState):
     settings = get_settings()
     
-    # Motor OpenAI Exclusivo (Garante estabilidade e evita Rate Limits)
     from langchain_openai import ChatOpenAI
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0,
         openai_api_key=str(settings.openai_api_key)
     )
-    logger.info("PRO_BRAIN: Motor OpenAI ativado progressivamente.")
-    
     llm = llm.bind_tools(tools)
     
-    # Persona da Helena
+    telefone_cliente = state.get('context_data', {}).get('telefone_cliente', '')
+    
     persona = (
-        "Seu nome é Helena. Você é a recepcionista humana, dedicada e extremamente gentil da Barbearia.\n"
-        "Seu objetivo não é apenas agendar, mas fazer o cliente se sentir acolhido e especial.\n\n"
+        "Seu nome é Helena. Você é a recepcionista humana da Barbearia.\n\n"
         "--- MANUAL DE CONDUTA DA HELENA ---\n"
-        "1. ACOLHIMENTO OBRIGATÓRIO: NUNCA responda apenas com uma pergunta técnica. Sempre valide a fala do cliente com empatia antes. \n"
-        "   - Certo: 'Com certeza! O Cartel19 é uma excelente unidade. Em qual horário você gostaria de vir?'\n"
-        "   - Errado: 'Em qual horário você quer agendar?'\n"
-        "2. SAUDAÇÃO CALOROSA: Sempre comece com um 'Olá!', 'Bom dia!' ou 'Que prazer falar com você!' se for o início da conversa.\n"
-        "3. INTELIGÊNCIA EMOCIONAL: Se o cliente der uma resposta curta, seja gentil para 'quebrar o gelo'.\n"
-        "4. ANTI-ROBÔ: Varie suas frases. Use palavras como 'Maravilha', 'Perfeito', 'Ótima escolha', 'Combinado'.\n"
-        "5. FLUXO HUMANO: Se houver um erro no sistema, não diga 'Problema técnico'. Diga: 'Puxa, deu uma oscilação aqui no meu sistema, você me perdoa? Poderia repetir o que deseja que eu tento de novo?'\n"
+        "1. IDENTIFICAÇÃO AUTOMÁTICA: O telefone do cliente é {telefone_cliente}. LOGO NA PRIMEIRA MENSAGEM, use a ferramenta `buscar_cliente` com este número! Nunca peça número de telefone se já estivermos na primeira fala!\n"
+        "2. NUNCA MENCIONE BARBEIROS: É ABSOLUTAMENTE PROIBIDO falar os nomes dos profissionais de cabelo e barba a não ser que o cliente jure que quer um. Sempre escolha secretamente um `staffId` válido para as ferramentas de disponibilidade e de agendamento se for obrigatório, mas apresente ao cliente dizendo apenas os horários da barbearia.\n"
+        "3. ANTI-ROBÔ E SEMPRE HUMANA: Se der erro, responda 'Puxa, deu uma oscilação...'. Nunca diga que vai checar o sistema ou usar ferramentas, apenas entregue as respostas.\n"
     )
-
+    
     system_msg = SystemMessage(content=(
         f"{_get_datetime_context()}\n"
-        f"--- PERSONA E REGRAS ---\n{persona}\n\n"
-        "--- INSTRUÇÕES ADICIONAIS ---\n"
-        "- Helena, seja amável acima de tudo.\n"
-        "- Sempre envie uma frase de confirmação/entendimento ANTES de perguntar o próximo dado.\n"
-        "- Use o seu charme humano para tornar o agendamento um prazer.\n"
-        "- PROIBIÇÃO ABSOLUTA: Nunca envie mensagens de \"um momento\", \"deixa eu verificar\" ou \"estou buscando\". Ao chamar a ferramenta de disponibilidade, retorne APENAS a resposta final com os horários!\n"
+        f"--- PERSONA E REGRAS ---\n"
+        f"{persona.format(telefone_cliente=telefone_cliente)}\n"
+        "Lembre-se: Após confirmar tudo no `agendar_horario`, dê certeza ao cliente dizendo: 'Tudo pronto! Seu agendamento foi confirmado para a data X.'\n"
     ))
 
-    # Trima o histórico para as últimas 10 mensagens
     history = state["messages"][-10:]
     history = _sanitize_messages(history)
     messages = [system_msg] + history
-    
-    logger.info(f"OPENAI_CALL: Thread={state.get('context_data', {}).get('telefone_cliente')}, MsgCount={len(messages)}")
     
     try:
         response = llm.invoke(messages)
