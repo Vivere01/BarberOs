@@ -61,6 +61,15 @@ class Settings(BaseSettings):
     # --- Sentry ---
     sentry_dsn: Optional[str] = Field(default=None)
 
+    # --- Groq ---
+    groq_api_key: str = Field(default="")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
+
+    # --- Evolution API ---
+    evolution_api_key: str = Field(default="")
+    evolution_base_url: str = Field(default="")
+    evolution_instance_name: str = Field(default="")
+
     # --- ChromaDB ---
     chroma_persist_dir: str = Field(default="./data/chromadb")
     chroma_collection_name: str = Field(default="barbershop_knowledge")
