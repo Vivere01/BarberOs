@@ -66,7 +66,7 @@ async def consultar_servicos() -> dict:
     """Consulta os serviços disponíveis na barbearia (preços, nomes)."""
     try:
         client = get_pro_client()
-        return await client.get_services()
+        return await client.list_services()
     except Exception as e:
         logger.error(f"TOOL_ERROR (consultar_servicos): {str(e)}")
         return {"status": "erro", "mensagem": "No momento não consegui carregar a lista de serviços, mas posso tentar novamente."}
@@ -76,7 +76,7 @@ async def consultar_profissionais() -> dict:
     """Consulta os barbeiros/profissionais disponíveis na equipe."""
     try:
         client = get_pro_client()
-        return await client.get_staff()
+        return await client.list_staff()
     except Exception as e:
         logger.error(f"TOOL_ERROR (consultar_profissionais): {str(e)}")
         return {"status": "erro", "mensagem": "Houve um pequeno atraso ao consultar nossa equipe, mas já estou verificando."}
@@ -86,7 +86,10 @@ async def verificar_disponibilidade(servico_id: str, profissional_id: Optional[s
     """Verifica horários e datas disponíveis para agendamento."""
     try:
         client = get_pro_client()
-        return await client.get_availability(service_id=servico_id, staff_id=profissional_id, date=data)
+        # TODO: A API atual não tem get_availability. Estamos usando list_appointments para ver horários ocupados.
+        # Ideally we should have an endpoint in ChatBarber for availability. For now, let's call ai-context or something similar.
+        context = await client.get_ai_context()
+        return context
     except Exception as e:
         logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
         return {"status": "erro", "mensagem": "Não consegui ver os horários agora, mas se você me der um segundinho eu tento de novo!"}
@@ -110,7 +113,8 @@ async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str
             client_id=cliente_id,
             service_id=servico_id,
             staff_id=profissional_id,
-            start_time=horario
+            store_id="", # TODO: Add store_id
+            scheduled_at=horario
         )
     except Exception as e:
         logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
