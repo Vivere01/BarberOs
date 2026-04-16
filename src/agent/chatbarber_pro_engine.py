@@ -22,9 +22,7 @@ from src.config.logging_config import get_logger
 
 logger = get_logger("agent.chatbarber_pro")
 
-# Carrega configurações
-settings = get_settings()
-GROQ_API_KEY = settings.groq_api_key
+# As configurações são lidas dinamicamente dentro das funções
 
 # Contexto de sessão PRO — isolado por coroutine
 _pro_session_ctx: ContextVar[dict] = ContextVar("chatbarber_pro_session", default={})
