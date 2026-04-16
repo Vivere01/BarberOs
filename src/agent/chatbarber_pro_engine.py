@@ -167,15 +167,29 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add]
     context_data: dict
 
+def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
+    """Remove ToolMessages do início da lista que não têm AIMessage predecessor."""
+    if not messages:
+        return messages
+    start = 0
+    for i, msg in enumerate(messages):
+        if isinstance(msg, ToolMessage):
+            prev = messages[i - 1] if i > 0 else None
+            if prev is None or not (isinstance(prev, AIMessage) and getattr(prev, "tool_calls", None)):
+                start = i + 1
+        else:
+            break
+    return messages[start:]
+
 def call_model(state: AgentState):
     settings = get_settings()
     
-    # Motor OpenAI Exclusivo (Garante estabilidade e evita Rate Limits do Groq)
+    # Motor OpenAI Exclusivo (Garante estabilidade e evita Rate Limits)
     from langchain_openai import ChatOpenAI
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0,
-        openai_api_key=settings.OPENAI_API_KEY
+        openai_api_key=str(settings.openai_api_key)
     )
     logger.info("PRO_BRAIN: Motor OpenAI ativado progressivamente.")
     
@@ -204,8 +218,9 @@ def call_model(state: AgentState):
         "- Use o seu charme humano para tornar o agendamento um prazer.\n"
     ))
 
-    # Trima o histórico para as últimas 10 mensagens para evitar context_length_exceeded
+    # Trima o histórico para as últimas 10 mensagens
     history = state["messages"][-10:]
+    history = _sanitize_messages(history)
     messages = [system_msg] + history
     
     logger.info(f"OPENAI_CALL: Thread={state.get('context_data', {}).get('telefone_cliente')}, MsgCount={len(messages)}")
