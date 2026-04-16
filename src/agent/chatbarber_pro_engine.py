@@ -61,64 +61,73 @@ def _get_datetime_context() -> str:
 # Tools do ChatBarber PRO
 # ===================================================================
 
+def _limit_output(result: Any, max_len: int = 4000) -> str:
+    res_str = str(result)
+    if len(res_str) > max_len:
+        logger.warning(f"TOOL_PAYLOAD_TOO_LARGE: Truncando resposta de {len(res_str)} para {max_len} caracteres.")
+        return res_str[:max_len] + "... [CONTEÚDO TRUNCADO POR SER MUITO LONGO]"
+    return res_str
+
 @tool
-async def consultar_servicos() -> dict:
+async def consultar_servicos() -> str:
     """Consulta os serviços disponíveis na barbearia (preços, nomes)."""
     try:
         client = get_pro_client()
-        return await client.list_services()
+        return _limit_output(await client.list_services())
     except Exception as e:
         logger.error(f"TOOL_ERROR (consultar_servicos): {str(e)}")
-        return {"status": "erro", "mensagem": "No momento não consegui carregar a lista de serviços, mas posso tentar novamente."}
+        return "Erro: No momento não consegui carregar a lista de serviços."
 
 @tool
-async def consultar_profissionais() -> dict:
+async def consultar_profissionais() -> str:
     """Consulta os barbeiros/profissionais disponíveis na equipe."""
     try:
         client = get_pro_client()
-        return await client.list_staff()
+        return _limit_output(await client.list_staff())
     except Exception as e:
         logger.error(f"TOOL_ERROR (consultar_profissionais): {str(e)}")
-        return {"status": "erro", "mensagem": "Houve um pequeno atraso ao consultar nossa equipe, mas já estou verificando."}
+        return "Erro: Houve um pequeno atraso ao consultar nossa equipe."
 
 @tool
-async def verificar_disponibilidade(servico_id: str, profissional_id: Optional[str] = None, data: Optional[str] = None) -> dict:
+async def verificar_disponibilidade(servico_id: str, profissional_id: Optional[str] = None, data: Optional[str] = None) -> str:
     """Verifica horários e datas disponíveis para agendamento."""
     try:
         client = get_pro_client()
-        # TODO: A API atual não tem get_availability. Estamos usando list_appointments para ver horários ocupados.
-        # Ideally we should have an endpoint in ChatBarber for availability. For now, let's call ai-context or something similar.
-        context = await client.get_ai_context()
-        return context
+        # Fallback de emergência caso a rota ai-context ainda não exista ou falhe
+        try:
+            return _limit_output(await client.get_ai_context())
+        except Exception as api_err:
+            logger.warning(f"Rota ai-context falhou ({str(api_err)}). Tentando fallback via list_appointments.")
+            return _limit_output(await client.list_appointments())
     except Exception as e:
         logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
-        return {"status": "erro", "mensagem": "Não consegui ver os horários agora, mas se você me der um segundinho eu tento de novo!"}
+        return "Erro: Não consegui ver os horários agora."
 
 @tool
-async def cadastrar_cliente(nome: str, telefone: str) -> dict:
+async def cadastrar_cliente(nome: str, telefone: str) -> str:
     """Realiza o cadastro de um novo cliente no sistema."""
     try:
         client = get_pro_client()
-        return await client.create_client(name=nome, phone=telefone)
+        return _limit_output(await client.create_client(name=nome, phone=telefone))
     except Exception as e:
         logger.error(f"TOOL_ERROR (cadastrar_cliente): {str(e)}")
-        return {"status": "erro", "mensagem": "Tive um probleminha no cadastro, mas não se preocupe, vamos resolver."}
+        return "Erro: Falha no cadastro."
 
 @tool
-async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str, horario: str) -> dict:
+async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str, horario: str) -> str:
     """Realiza o agendamento final do horário escolhido pelo cliente."""
     try:
         client = get_pro_client()
-        return await client.create_appointment(
+        return _limit_output(await client.create_appointment(
             client_id=cliente_id,
             service_id=servico_id,
             staff_id=profissional_id,
             store_id="", # TODO: Add store_id
             scheduled_at=horario
-        )
+        ))
     except Exception as e:
         logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
-        return {"status": "erro", "mensagem": "O sistema de agendamento oscilou, mas eu vou tentar confirmar seu horário manualmente se precisar."}
+        return "Erro: O sistema de agendamento não confirmou o horário."
 
 async def transcribe_audio(audio_base64: str) -> str:
     """Transcrição usando OpenAI Whisper."""
