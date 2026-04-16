@@ -3,7 +3,7 @@ BarberOS - ChatBarber PRO Engine
 ================================
 Engine dedicada para o sistema ChatBarber PRO.
 """
-from typing import Annotated, TypedDict, List, Optional
+from typing import Annotated, TypedDict, List, Optional, Any
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from langgraph.graph import StateGraph, END
