@@ -137,16 +137,20 @@ class AgentState(TypedDict):
 
 def call_model(state: AgentState):
     settings = get_settings()
+    has_openai = bool(settings.OPENAI_API_KEY)
+    has_groq = bool(settings.GROQ_API_KEY)
+    
+    logger.info(f"PRO_BRAIN_INIT: OpenAI={has_openai}, Groq={has_groq}")
     
     # Prioriza OpenAI, mas aceita Groq como fallback se necessário
-    if settings.OPENAI_API_KEY:
+    if has_openai:
         from langchain_openai import ChatOpenAI
         llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0,
             openai_api_key=settings.OPENAI_API_KEY
         )
-        logger.info("PRO_BRAIN: Usando motor OpenAI (GPT-4o-mini)")
+        logger.info("PRO_BRAIN: Motor selecionado -> OpenAI (GPT-4o-mini)")
     else:
         from langchain_groq import ChatGroq
         llm = ChatGroq(
@@ -154,7 +158,7 @@ def call_model(state: AgentState):
             temperature=0,
             groq_api_key=settings.GROQ_API_KEY
         )
-        logger.info("PRO_BRAIN: Usando motor Groq (Llama-3.3-70b)")
+        logger.info("PRO_BRAIN: Motor selecionado -> Groq (Llama-3.3-70b)")
     
     llm = llm.bind_tools(tools)
     
