@@ -63,8 +63,8 @@ async def handle_evolution_webhook(
             logger.info(f"EVOLUTION_AUDIO_TRANSCRITO: {text}")
         else:
             logger.warning("EVOLUTION_IN: Áudio recebido, mas sem base64 habilitado no Webhook da Evolution.")
-            # Responde pedindo texto se falhar
-            text = "Enviou um áudio, mas meu sistema de transcrição não conseguiu ler. Pode escrever, por favor?"
+            # Responde pro modelo que o cliente mandou áudio mas a config tá errada
+            text = "[Aviso de Sistema do Bot]: O cliente enviou um áudio, mas a sua conexão via webhook não enviou o base64. Peça desculpas gentilmente e diga que o sistema de áudio está com instabilidade e peça para ele digitar o que ele falou no áudio."
 
     if not text:
         return {"status": "ignored", "reason": "no_text_content"}

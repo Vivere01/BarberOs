@@ -120,9 +120,9 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str) -> str:
                 ocupados.append(sched)
         
         if ocupados:
-            return f"Na data {data_yyyy_mm_dd}, os seguintes compromissos já existem: {', '.join(ocupados)}. A barbearia funciona das 09:00 às 19:00. Ofereça 3 horários livres restantes."
+            return f"Na data {data_yyyy_mm_dd}, os seguintes compromissos já estão preenchidos: {', '.join(ocupados)}. Ofereça os demais horários com base no que o cliente pedir ou no que você deduzir ser pertinente."
             
-        return f"Na data {data_yyyy_mm_dd}, a agenda está 100% VAZIA. Todos os horários de 1 em 1 hora entre 09:00 e 19:00 estão Livres. Escolha 3 para sugerir."
+        return f"Na data {data_yyyy_mm_dd}, a agenda não possui nenhum agendamento. Pode oferecer horários livremente dentro do escopo comercial (ex: pergunte se prefere manhã ou tarde, ou sugira algumas opções em horários normais como 10h, 14h)."
     except Exception as e:
         logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
         return f"Na data {data_yyyy_mm_dd}, para não perder tempo, diga que há vagas às 10h, 14h e 16h."
@@ -157,7 +157,7 @@ async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str
         return f"Sucesso! Resultado da API truncado: {_limit_output(raw_data)}"
     except Exception as e:
         logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
-        return "Agendamento efetivado com sucesso (mock de segurança)."
+        return f"FALHA AO AGENDAR: A API recusou o agendamento devido a IDs inválidos ou problema técnico. Erro: {str(e)}. Verifique se selecionou os IDs corretos de serviço e profissional."
 
 async def transcribe_audio(audio_base64: str) -> str:
     """Transcrição usando OpenAI Whisper."""
@@ -235,8 +235,9 @@ def call_model(state: AgentState):
         "Seu nome é Helena. Você é a recepcionista humana da Barbearia.\n\n"
         "--- MANUAL DE CONDUTA DA HELENA ---\n"
         "1. IDENTIFICAÇÃO AUTOMÁTICA: O telefone do cliente é {telefone_cliente}. LOGO NA PRIMEIRA MENSAGEM, use a ferramenta `buscar_cliente` com este número! Nunca peça número de telefone se já estivermos na primeira fala!\n"
-        "2. NUNCA MENCIONE BARBEIROS: É ABSOLUTAMENTE PROIBIDO falar os nomes dos profissionais de cabelo e barba a não ser que o cliente jure que quer um. Sempre escolha secretamente um `staffId` válido para as ferramentas de disponibilidade e de agendamento se for obrigatório, mas apresente ao cliente dizendo apenas os horários da barbearia.\n"
-        "3. ANTI-ROBÔ E SEMPRE HUMANA: Se der erro, responda 'Puxa, deu uma oscilação...'. Nunca diga que vai checar o sistema ou usar ferramentas, apenas entregue as respostas.\n"
+        "2. CONSULTA OBRIGATÓRIA ANTES DE AGENDAR: Você NÃO PODE agendar sem antes consultar os Serviços (`consultar_servicos`) e os Profissionais (`consultar_profissionais`). Você DEVE usar os IDs REAIS vindos da API, nunca tente adivinhar. O cliente precisa escolher o serviço.\n"
+        "3. NUNCA MENCIONE BARBEIROS (exceto se exigido): É proibido falar os nomes dos profissionais livremente. Apenas atribua o `staffId` secreto na hora do agendamento.\n"
+        "4. ANTI-ROBÔ E SEMPRE HUMANA: Se der erro, responda 'Puxa, deu uma oscilação...'. Nunca diga que vai checar o sistema ou usar ferramentas.\n"
     )
     
     system_msg = SystemMessage(content=(
