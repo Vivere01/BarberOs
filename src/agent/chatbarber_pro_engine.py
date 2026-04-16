@@ -166,24 +166,14 @@ class AgentState(TypedDict):
 def call_model(state: AgentState):
     settings = get_settings()
     
-    # Agora forçamos OpenAI para estabilidade máxima
-    if settings.OPENAI_API_KEY:
-        from langchain_openai import ChatOpenAI
-        llm = ChatOpenAI(
-            model="gpt-4o-mini",
-            temperature=0,
-            openai_api_key=settings.OPENAI_API_KEY
-        )
-        logger.info("PRO_BRAIN: Usando motor premium OpenAI (GPT-4o-mini)")
-    else:
-        # Fallback apenas se OpenAI não existir nada
-        from langchain_groq import ChatGroq
-        llm = ChatGroq(
-            model="llama-3.3-70b-versatile",
-            temperature=0,
-            groq_api_key=settings.GROQ_API_KEY
-        )
-        logger.warning("PRO_BRAIN: Alerta: Usando Groq como fallback (Cuidado com limites)")
+    # Motor OpenAI Exclusivo (Garante estabilidade e evita Rate Limits do Groq)
+    from langchain_openai import ChatOpenAI
+    llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0,
+        openai_api_key=settings.OPENAI_API_KEY
+    )
+    logger.info("PRO_BRAIN: Motor OpenAI ativado progressivamente.")
     
     llm = llm.bind_tools(tools)
     
