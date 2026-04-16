@@ -11,6 +11,7 @@ from operator import add
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode
 
+from langchain_openai import ChatOpenAI
 from langchain_groq import ChatGroq
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
@@ -61,67 +62,59 @@ def _get_datetime_context() -> str:
 # ===================================================================
 
 @tool
-async def consultar_servicos():
-    """Lista todos os serviços, preços e durações disponíveis na barbearia."""
+async def consultar_servicos() -> dict:
+    """Consulta os serviços disponíveis na barbearia (preços, nomes)."""
     try:
         client = get_pro_client()
-        services = await client.list_services()
-        return {"status": "sucesso", "servicos": services}
+        return await client.get_services()
     except Exception as e:
-        return {"status": "erro", "mensagem": str(e)}
+        logger.error(f"TOOL_ERROR (consultar_servicos): {str(e)}")
+        return {"status": "erro", "mensagem": "No momento não consegui carregar a lista de serviços, mas posso tentar novamente."}
 
 @tool
-async def consultar_profissionais():
-    """Lista os barbeiros/profissionais da equipe."""
+async def consultar_profissionais() -> dict:
+    """Consulta os barbeiros/profissionais disponíveis na equipe."""
     try:
         client = get_pro_client()
-        staff = await client.list_staff()
-        return {"status": "sucesso", "equipe": staff}
+        return await client.get_staff()
     except Exception as e:
-        return {"status": "erro", "mensagem": str(e)}
+        logger.error(f"TOOL_ERROR (consultar_profissionais): {str(e)}")
+        return {"status": "erro", "mensagem": "Houve um pequeno atraso ao consultar nossa equipe, mas já estou verificando."}
 
 @tool
-async def verificar_disponibilidade(data_desejada: str):
-    """
-    Busca horários disponíveis para agendamento.
-    Parâmetro: data_desejada (ISO 8601, ex: 2024-04-16)
-    """
+async def verificar_disponibilidade(servico_id: str, profissional_id: Optional[str] = None, data: Optional[str] = None) -> dict:
+    """Verifica horários e datas disponíveis para agendamento."""
     try:
         client = get_pro_client()
-        appointments = await client.list_appointments()
-        return {"status": "sucesso", "agendamentos_existentes": appointments, "aviso": "O agente deve sugerir horários livres com base na agenda do dia."}
+        return await client.get_availability(service_id=servico_id, staff_id=profissional_id, date=data)
     except Exception as e:
-        return {"status": "erro", "mensagem": str(e)}
+        logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
+        return {"status": "erro", "mensagem": "Não consegui ver os horários agora, mas se você me der um segundinho eu tento de novo!"}
 
 @tool
-async def cadastrar_cliente(nome: str, telefone: str, email: Optional[str] = None):
-    """Cria um novo cadastro de cliente no sistema."""
+async def cadastrar_cliente(nome: str, telefone: str) -> dict:
+    """Realiza o cadastro de um novo cliente no sistema."""
     try:
         client = get_pro_client()
-        res = await client.create_client(name=nome, phone=telefone, email=email)
-        return {"status": "sucesso", "cliente": res}
+        return await client.create_client(name=nome, phone=telefone)
     except Exception as e:
-        return {"status": "erro", "mensagem": str(e)}
+        logger.error(f"TOOL_ERROR (cadastrar_cliente): {str(e)}")
+        return {"status": "erro", "mensagem": "Tive um probleminha no cadastro, mas não se preocupe, vamos resolver."}
 
 @tool
-async def agendar_horario(client_id: str, service_id: str, staff_id: str, store_id: str, data_hora: str, notas: str = "Agendamento via IA"):
-    """
-    Realiza o agendamento final no sistema.
-    Parâmetros: client_id, service_id, staff_id, store_id, data_hora (ISO 8601)
-    """
+async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str, horario: str) -> dict:
+    """Realiza o agendamento final do horário escolhido pelo cliente."""
     try:
         client = get_pro_client()
-        res = await client.create_appointment(
-            client_id=client_id,
-            service_id=service_id,
-            staff_id=staff_id,
-            store_id=store_id,
-            scheduled_at=data_hora,
-            notes=notas
+        return await client.create_appointment(
+            client_id=cliente_id,
+            service_id=servico_id,
+            staff_id=profissional_id,
+            start_time=horario
         )
-        return {"status": "sucesso", "agendamento": res}
     except Exception as e:
-        return {"status": "erro", "mensagem": str(e)}
+        logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
+        return {"status": "erro", "mensagem": "O sistema de agendamento oscilou, mas eu vou tentar confirmar seu horário manualmente se precisar."}
 
 async def transcribe_audio(audio_base64: str) -> str:
     """Transcrição usando OpenAI Whisper."""
@@ -194,41 +187,41 @@ def call_model(state: AgentState):
     
     llm = llm.bind_tools(tools)
     
-    # Carrega persona do arquivo para facilitar manutenção
+    # Persona da Helena
     persona = (
-        "Seu nome é Helena. Você é a recepcionista humana e gentil da Barbearia.\n"
-        "Seu objetivo é fazer o cliente se sentir bem-vindo e atendido com carinho e educação.\n\n"
-        "--- COMPORTAMENTO DA HELENA ---\n"
-        "1. APRESENTAÇÃO: Na primeira interação ou após um tempo, apresente-se: 'Olá! Eu sou a Helena, recepcionista aqui da barbearia. Como posso te ajudar hoje?'\n"
-        "2. SAUDAÇÃO PRIMEIRO: Se o cliente disser apenas 'Oi' ou 'Boa tarde', responda à saudação de forma gentil. NÃO force perguntas de agendamento imediatamente se o cliente ainda não expressou essa intenção.\n"
-        "3. EMPATIA E EDUCAÇÃO: Use frases como 'Que alegria falar com você!', 'Com certeza, vou te ajudar com isso', 'Só um minutinho que vou conferir para você'.\n"
-        "4. NÃO SEJA UM ROBÔ REPETITIVO: Se o cliente já foi saudado, não precisa se apresentar de novo em cada frase. Mantenha a conversa natural.\n"
-        "5. INTENÇÃO CLARA: Se o cliente perguntar algo específico (preço, endereço), responda primeiro e depois, de forma suave, pergunte se ele gostaria de agendar.\n"
-        "6. ERROS HUMANOS: Se não entender, diga algo como: 'Poxa, o sinal falhou aqui ou eu me confundi, você poderia repetir para a Helena, por favor?'\n"
+        "Seu nome é Helena. Você é a recepcionista humana, dedicada e extremamente gentil da Barbearia.\n"
+        "Seu objetivo não é apenas agendar, mas fazer o cliente se sentir acolhido e especial.\n\n"
+        "--- MANUAL DE CONDUTA DA HELENA ---\n"
+        "1. ACOLHIMENTO OBRIGATÓRIO: NUNCA responda apenas com uma pergunta técnica. Sempre valide a fala do cliente com empatia antes. \n"
+        "   - Certo: 'Com certeza! O Cartel19 é uma excelente unidade. Em qual horário você gostaria de vir?'\n"
+        "   - Errado: 'Em qual horário você quer agendar?'\n"
+        "2. SAUDAÇÃO CALOROSA: Sempre comece com um 'Olá!', 'Bom dia!' ou 'Que prazer falar com você!' se for o início da conversa.\n"
+        "3. INTELIGÊNCIA EMOCIONAL: Se o cliente der uma resposta curta, seja gentil para 'quebrar o gelo'.\n"
+        "4. ANTI-ROBÔ: Varie suas frases. Use palavras como 'Maravilha', 'Perfeito', 'Ótima escolha', 'Combinado'.\n"
+        "5. FLUXO HUMANO: Se houver um erro no sistema, não diga 'Problema técnico'. Diga: 'Puxa, deu uma oscilação aqui no meu sistema, você me perdoa? Poderia repetir o que deseja que eu tento de novo?'\n"
     )
 
     system_msg = SystemMessage(content=(
         f"{_get_datetime_context()}\n"
         f"--- PERSONA E REGRAS ---\n{persona}\n\n"
         "--- INSTRUÇÕES ADICIONAIS ---\n"
-        "- Você é a Helena. Aja como uma pessoa real.\n"
-        "- Responda primeiro à saudação. Só use as ferramentas se houver uma solicitação clara.\n"
-        "- Mantenha as respostas concisas e amigáveis no WhatsApp.\n"
+        "- Helena, seja amável acima de tudo.\n"
+        "- Sempre envie uma frase de confirmação/entendimento ANTES de perguntar o próximo dado.\n"
+        "- Use o seu charme humano para tornar o agendamento um prazer.\n"
     ))
 
     # Trima o histórico para as últimas 10 mensagens para evitar context_length_exceeded
     history = state["messages"][-10:]
     messages = [system_msg] + history
     
-    logger.info(f"GROQ_CALL: Thread={state.get('context_data', {}).get('telefone_cliente')}, MsgCount={len(messages)}")
+    logger.info(f"OPENAI_CALL: Thread={state.get('context_data', {}).get('telefone_cliente')}, MsgCount={len(messages)}")
     
     try:
         response = llm.invoke(messages)
         return {"messages": [response]}
     except Exception as e:
-        logger.error(f"GROQ_INVOKE_ERROR: {str(e)}")
-        # Retorna uma mensagem de erro amigável se o Groq falhar
-        return {"messages": [AIMessage(content="Desculpe, tive um problema técnico momentâneo. Pode repetir?")]}
+        logger.error(f"PRO_BRAIN_INVOKE_ERROR: {str(e)}")
+        return {"messages": [AIMessage(content="Poxa, deu uma oscilação aqui no meu sistema, você me perdoa? Poderia repetir o que deseja que eu tento de novo?")]}
 
 def should_continue(state: AgentState):
     last_message = state["messages"][-1]
