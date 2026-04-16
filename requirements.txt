@@ -10,3 +10,5 @@ beautifulsoup4
 playwright
 loguru
 structlog
+langchain-groq
+groq
