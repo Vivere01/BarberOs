@@ -123,6 +123,43 @@ async def agendar_horario(client_id: str, service_id: str, staff_id: str, store_
     except Exception as e:
         return {"status": "erro", "mensagem": str(e)}
 
+async def transcribe_audio(audio_base64: str) -> str:
+    """Transcrição usando OpenAI Whisper."""
+    settings = get_settings()
+    if not settings.OPENAI_API_KEY:
+        logger.error("TRANSCRIPTION_ERROR: OpenAI API Key ausente.")
+        return ""
+        
+    try:
+        import base64
+        import tempfile
+        import os
+        from openai import OpenAI
+        
+        client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        
+        # Converte base64 para arquivo temporário
+        audio_data = base64.b64decode(audio_base64)
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_file:
+            tmp_file.write(audio_data)
+            tmp_path = tmp_file.name
+            
+        try:
+            with open(tmp_path, "rb") as audio_file:
+                transcript = client.audio.transcriptions.create(
+                    model="whisper-1",
+                    file=audio_file
+                )
+            logger.info("TRANSCRIPTION_SUCCESS: Transcrição via OpenAI Whisper concluída.")
+            return transcript.text
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+                
+    except Exception as e:
+        logger.error(f"TRANSCRIPTION_ERROR: Falha ao transcrever com OpenAI: {str(e)}")
+        return ""
+
 tools = [consultar_servicos, consultar_profissionais, verificar_disponibilidade, cadastrar_cliente, agendar_horario]
 tool_node = ToolNode(tools)
 
@@ -135,28 +172,25 @@ class AgentState(TypedDict):
 
 def call_model(state: AgentState):
     settings = get_settings()
-    has_openai = bool(settings.OPENAI_API_KEY)
-    has_groq = bool(settings.GROQ_API_KEY)
     
-    logger.info(f"PRO_BRAIN_INIT: OpenAI={has_openai}, Groq={has_groq}")
-    
-    # Prioriza OpenAI, mas aceita Groq como fallback se necessário
-    if has_openai:
+    # Agora forçamos OpenAI para estabilidade máxima
+    if settings.OPENAI_API_KEY:
         from langchain_openai import ChatOpenAI
         llm = ChatOpenAI(
             model="gpt-4o-mini",
             temperature=0,
             openai_api_key=settings.OPENAI_API_KEY
         )
-        logger.info("PRO_BRAIN: Motor selecionado -> OpenAI (GPT-4o-mini)")
+        logger.info("PRO_BRAIN: Usando motor premium OpenAI (GPT-4o-mini)")
     else:
+        # Fallback apenas se OpenAI não existir nada
         from langchain_groq import ChatGroq
         llm = ChatGroq(
             model="llama-3.3-70b-versatile",
             temperature=0,
             groq_api_key=settings.GROQ_API_KEY
         )
-        logger.info("PRO_BRAIN: Motor selecionado -> Groq (Llama-3.3-70b)")
+        logger.warning("PRO_BRAIN: Alerta: Usando Groq como fallback (Cuidado com limites)")
     
     llm = llm.bind_tools(tools)
     
