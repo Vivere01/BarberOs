@@ -18,6 +18,7 @@ from langchain_core.tools import tool
 from src.config.settings import get_settings
 from contextvars import ContextVar
 from src.integrations.chatbarber_pro.client import ChatBarberProClient
+from src.config.logging_config import get_logger
 
 logger = get_logger("agent.chatbarber_pro")
 
