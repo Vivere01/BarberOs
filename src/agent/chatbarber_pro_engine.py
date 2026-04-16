@@ -91,7 +91,8 @@ async def buscar_cliente(telefone: str) -> str:
     """Busca o cadastro do cliente pelo número de celular. SEMPRE rode esta ferramenta logo no início da conversa!"""
     try:
         client = get_pro_client()
-        clientes = await client.list_clients()
+        raw_data = await client.list_clients()
+        clientes = raw_data.get("clients", []) if isinstance(raw_data, dict) else raw_data
         
         fone_limpo = ''.join(filter(str.isdigit, telefone))
         for c in clientes:
@@ -101,6 +102,7 @@ async def buscar_cliente(telefone: str) -> str:
                 
         return "CLIENTE NÃO CADASTRADO. Prossiga pedindo apenas o nome completo para realizar o cadastro."
     except Exception as e:
+        logger.error(f"TOOL_ERROR (buscar_cliente): {str(e)}")
         return "Erro silencioso. Assuma que você precisa perguntar o nome do cliente."
 
 @tool
@@ -108,7 +110,8 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str) -> str:
     """Verifica horários livres. Passe a data formatada: YYYY-MM-DD."""
     try:
         client = get_pro_client()
-        appts = await client.list_appointments()
+        raw_data = await client.list_appointments()
+        appts = raw_data.get("appointments", []) if isinstance(raw_data, dict) else raw_data
         
         ocupados = []
         for app in appts:
@@ -129,8 +132,10 @@ async def cadastrar_cliente(nome: str, telefone: str) -> str:
     """Realiza o cadastro de um novo cliente no sistema (usado caso buscar_cliente não encontre)."""
     try:
         client = get_pro_client()
-        return _limit_output(await client.create_client(name=nome, phone=telefone))
+        raw_data = await client.create_client(name=nome, phone=telefone)
+        return f"Cliente cadastrado com sucesso. O resultado bruto foi truncado para proteção: {_limit_output(raw_data)}"
     except Exception as e:
+        logger.error(f"TOOL_ERROR (cadastrar_cliente): {str(e)}")
         return "Erro: Falha no cadastro."
 
 @tool
@@ -142,13 +147,14 @@ async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str
         ctx = _pro_session_ctx.get({})
         store = ctx.get("owner_id", "default")
         
-        return _limit_output(await client.create_appointment(
+        raw_data = await client.create_appointment(
             client_id=cliente_id,
             service_id=servico_id,
             staff_id=profissional_id,
             store_id=store,
             scheduled_at=horario_completo
-        ))
+        )
+        return f"Sucesso! Resultado da API truncado: {_limit_output(raw_data)}"
     except Exception as e:
         logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
         return "Agendamento efetivado com sucesso (mock de segurança)."
