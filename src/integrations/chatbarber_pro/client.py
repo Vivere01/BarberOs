@@ -189,13 +189,30 @@ class ChatBarberProClient:
             data["cpf"] = cpf
         return await self._request_with_retry("POST", "clients", data)
 
-    async def list_appointments(self) -> Any:
-        """Lista todos os agendamentos."""
-        return await self._request_with_retry("GET", "appointments")
+    async def list_appointments(self, date_filter: Optional[str] = None) -> Any:
+        """Lista agendamentos. Se date_filter (YYYY-MM-DD) for passado, filtra na API ou localmente."""
+        endpoint = "appointments"
+        if date_filter:
+            # Tenta filtro via query param se a API suportar
+            endpoint = f"appointments?date={date_filter}"
+            
+        raw_data = await self._request_with_retry("GET", endpoint)
+        
+        # Se a API não filtrou, filtramos localmente para não explodir o contexto da IA
+        if date_filter and isinstance(raw_data, (list, dict)):
+            appts = raw_data.get("appointments", []) if isinstance(raw_data, dict) else raw_data
+            filtered = [a for a in appts if date_filter in str(a.get("scheduledAt", ""))]
+            return {"appointments": filtered}
+            
+        return raw_data
+
+    async def list_stores(self) -> Any:
+        """Lista as unidades/lojas físicas da barbearia sob este owner_id."""
+        return await self._request_with_retry("GET", "stores")
 
     async def create_appointment(self, client_id: str, service_id: str, staff_id: str, 
                                   store_id: str, scheduled_at: str, 
-                                  notes: str = "Agendamento via IA") -> Dict[str, Any]:
+                                  notes: str = "Agendamento via IA Helena") -> Dict[str, Any]:
         """Cria agendamento."""
         data = {
             "clientId": client_id,

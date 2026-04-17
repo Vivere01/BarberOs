@@ -184,37 +184,27 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str) -> str:
             sched = app.get("scheduledAt", "")
             if data_yyyy_mm_dd in sched:
                 # Extrai HH:MM do scheduledAt
-                try:
-                    dt = datetime.fromisoformat(sched.replace("Z", "+00:00"))
-                    dt_brasilia = dt.astimezone(_TZ_BRASILIA)
-                    ocupados.add(dt_brasilia.strftime("%H:%M"))
-                except Exception:
-                    ocupados.add(sched)
+    """Consulta os horários livres em uma data (YYYY-MM-DD). Use ANTES de oferecer horários."""
+    client = get_pro_client()
+    try:
+        # Filtra na fonte para não explodir o payload
+        appts_data = await client.list_appointments(date_filter=data_yyyy_mm_dd)
+        appts = appts_data.get("appointments", []) if isinstance(appts_data, dict) else appts_data
         
-        # ========== FIX BUG #2: Filtro de horários passados ==========
         now = _now_brasilia()
         is_today = data_yyyy_mm_dd == now.strftime("%Y-%m-%d")
+        # Margem de 45 min para segurança
         hora_atual_minutos = now.hour * 60 + now.minute
         
-        # Gera grade de horários comerciais (08:00 às 20:00, intervalos de 30min)
-        todos_horarios = []
+        disponiveis = []
         for h in range(8, 20):
             for m in [0, 30]:
                 horario = f"{h:02d}:{m:02d}"
                 horario_minutos = h * 60 + m
                 
-                # Se é hoje, filtra horários que já passaram (com margem de 30 min)
-                if is_today and horario_minutos <= (hora_atual_minutos + 30):
+                if is_today and horario_minutos <= (hora_atual_minutos + 45):
                     continue
                     
-                if horario not in ocupados:
-                    todos_horarios.append(horario)
-        
-        if not todos_horarios:
-            return f"Na data {data_yyyy_mm_dd}, não há horários disponíveis. Sugira outra data ao cliente."
-        
-        horarios_str = ", ".join(todos_horarios[:10])  # Limita a 10 sugestões
-        
         if is_today:
             return (
                 f"Como já são {now.strftime('%H:%M')}, os horários disponíveis para HOJE ({data_yyyy_mm_dd}) são: "
@@ -261,85 +251,71 @@ async def cadastrar_cliente(nome: str, telefone: str, data_nascimento: str = "")
         return "Erro no cadastro, mas vamos prosseguir com o agendamento."
 
 @tool
-async def agendar_horario(cliente_id: str, servico_id: str, profissional_id: str, horario_completo: str) -> str:
-    """
-    Realiza o agendamento final.
-    Parâmetros:
-    - cliente_id: ID do cliente (obtido de buscar_cliente ou cadastrar_cliente)
-    - servico_id: ID do serviço (obtido de consultar_servicos)
-    - profissional_id: ID do profissional/staffId (obtido de consultar_profissionais)
-    - horario_completo: Data e hora no formato YYYY-MM-DDTHH:MM:00Z (ex: 2026-04-17T15:30:00Z)
-    """
+async def agendar_horario(client_id: str, service_id: str, staff_id: str, store_id: str, data_isostring: str) -> str:
+    """CONFIRMA e cria o agendamento no sistema. SÓ use após o cliente dizer 'SIM' ou autorizar. Exige store_id da unidade."""
+    client = get_pro_client()
     try:
-        client = get_pro_client()
-        ctx = _pro_session_ctx.get({})
-        store_id = ctx.get("owner_id", "default")
-        
-        raw_data = await client.create_appointment(
-            client_id=cliente_id,
-            service_id=servico_id,
-            staff_id=profissional_id,
+        res = await client.create_appointment(
+            client_id=client_id,
+            service_id=service_id,
+            staff_id=staff_id,
             store_id=store_id,
-            scheduled_at=horario_completo
+            scheduled_at=data_isostring
         )
-        
-        if isinstance(raw_data, dict) and raw_data.get("error"):
-            return (
-                f"FALHA NO AGENDAMENTO: {raw_data.get('detail', 'IDs inválidos ou erro técnico')}. "
-                f"Verifique se os IDs de serviço e profissional estão corretos."
-            )
-        
-        return (
-            f"AGENDAMENTO CRIADO COM SUCESSO! "
-            f"Confirme ao cliente com entusiasmo que está tudo pronto."
-        )
+        if isinstance(res, dict) and res.get("status") in ["success", "created"]:
+            return "SUCESSO: Agendamento realizado com êxito."
+        return f"ERRO: A API retornou: {res.get('error', 'Erro desconhecido')}"
     except Exception as e:
         logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
-        return f"FALHA: {str(e)}. Verifique IDs corretos de serviço e profissional."
+        return f"ERRO_CONEXAO: {str(e)}"
 
 
 # ===================================================================
 # Transcrição de Áudio
 # ===================================================================
 async def transcribe_audio(audio_base64: str) -> str:
-    """Transcrição usando OpenAI Whisper."""
-    settings = get_settings()
+    """Transcreve áudio base64 usando Whisper da OpenAI com diagnóstico profundo."""
+    from openai import AsyncOpenAI
+    from src.config.settings import get_settings
+    import base64
+    import tempfile
+    import os
     
-    # FIX BUG #4: Usa o campo correto — openai_api_key (minúsculo, via pydantic)
+    settings = get_settings()
+    # Pega qualquer uma das duas variáveis de chave (prioriza minúscula)
     api_key = settings.openai_api_key or settings.OPENAI_API_KEY
     
     if not api_key:
-        logger.error("TRANSCRIPTION_ERROR: OPENAI_API_KEY não configurada.")
-        return ""
+        logger.error("TRANSCRIPTION_ERROR: Chave OpenAI (OPENAI_API_KEY) não encontrada nas configurações.")
+        return "[Sistema sem chave de API para áudio]"
         
+    # Diagnóstico seguro da chave
+    masked_key = f"{api_key[:7]}...{api_key[-4:]}" if len(api_key) > 10 else "INVÁLIDA"
+    logger.info(f"AUDIO_DEBUG: Iniciando transcrição. Chave={masked_key}. Base64={len(audio_base64)} chars")
+        
+    client = AsyncOpenAI(api_key=api_key)
+    tmp_path = None
     try:
-        import base64
-        import tempfile
-        import os
-        from openai import OpenAI
-        
-        client = OpenAI(api_key=str(api_key))
-        
         audio_data = base64.b64decode(audio_base64)
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_file:
-            tmp_file.write(audio_data)
-            tmp_path = tmp_file.name
+        # WhatsApp envia OGG/Opus. Whisper aceita .ogg.
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            tmp.write(audio_data)
+            tmp_path = tmp.name
             
         try:
             with open(tmp_path, "rb") as audio_file:
-                transcript = client.audio.transcriptions.create(
-                    model="whisper-1",
+                res = await client.audio.transcriptions.create(
+                    model="whisper-1", 
                     file=audio_file,
-                    language="pt"  # Força português para melhor acurácia
+                    language="pt"
                 )
-            logger.info(f"TRANSCRIPTION_SUCCESS: {len(transcript.text)} chars")
-            return transcript.text
+            logger.info(f"TRANSCRIPTION_SUCCESS: '{res.text[:50]}...'")
+            return res.text
         finally:
-            if os.path.exists(tmp_path):
+            if tmp_path and os.path.exists(tmp_path):
                 os.remove(tmp_path)
-                
     except Exception as e:
-        logger.error(f"TRANSCRIPTION_ERROR: {str(e)}")
+        logger.error("TRANSCRIPTION_FAILED", error=str(e))
         return ""
 
 

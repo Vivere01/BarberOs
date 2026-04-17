@@ -61,7 +61,7 @@ async def handle_evolution_webhook(
         base64_audio = message_data.get("base64") or audio_info.get("base64")
         
         if base64_audio:
-            logger.info("EVOLUTION_IN: Recebido áudio base64. Iniciando transcrição...")
+            logger.info(f"EVOLUTION_IN: Áudio recebido ({len(base64_audio)} chars). Iniciando transcrição...")
             transcribed = await transcribe_audio(base64_audio)
             
             if transcribed and transcribed.strip():
