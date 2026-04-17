@@ -105,6 +105,17 @@ def _limit_output(result: Any, max_len: int = 4000) -> str:
     return res_str
 
 @tool
+async def consultar_unidades() -> str:
+    """Consulta as unidades (lojas) disponíveis para obter o store_id correto. Use se houver dúvida sobre qual barbearia o cliente deseja."""
+    try:
+        client = get_pro_client()
+        result = await client.list_stores()
+        return _limit_output(result)
+    except Exception as e:
+        logger.error(f"TOOL_ERROR (consultar_unidades): {str(e)}")
+        return "Não consegui listar as unidades."
+
+@tool
 async def consultar_servicos() -> str:
     """Consulta os serviços disponíveis (nome, preço, ID). Use antes de agendar para obter o serviceId correto."""
     try:
@@ -323,6 +334,7 @@ async def transcribe_audio(audio_base64: str) -> str:
 # Registro de Tools
 # ===================================================================
 tools = [
+    consultar_unidades,
     consultar_servicos, 
     consultar_profissionais, 
     buscar_cliente, 
@@ -405,20 +417,19 @@ PASSO 3 — AGENDAMENTO:
 - Use 'consultar_profissionais' para obter um staffId (seja discreto, não cite nomes a menos que o cliente peça)
 
 PASSO 4 — CONFIRMAÇÃO E AGENDAMENTO IMEDIATO:
-- Quando o cliente escolher serviço + data + horário, resuma:
-  "Perfeito! [SERVIÇO] no dia [DATA] às [HORA]. Posso confirmar?"
-- Quando o cliente disser SIM/PODE/CONFIRMA/BORA:
-  → Use IMEDIATAMENTE 'agendar_horario' com os IDs corretos
-  → Depois responda: "Tudo pronto! Seu agendamento foi confirmado para [DATA] às [HORA]. Te espero lá! 💈"
-- NÃO pergunte duas vezes. NÃO peça confirmação novamente após ele já ter confirmado.
+- Assim que o cliente escolher serviço + data + horário, você DEVE confirmar os detalhes.
+- Quando o cliente disser "sim", "pode", "ok" ou qualquer confirmação:
+  → Use a ferramenta 'agendar_horario' IMEDIATAMENTE.
+  → Você PRECISA do client_id, service_id, staff_id, store_id e o horário no formato ISO.
+  → Se não tiver o store_id, use 'consultar_unidades' primeiro.
+- Após o agendamento, confirme com: "Tudo pronto! Seu horário está marcado. Te espero lá! 💈"
+- Se a ferramenta retornar ERRO, explique brevemente o que houve e tente resolver.
 
 --- REGRAS OBRIGATÓRIAS ---
-1. ANTI-ROBÔ: Nunca mencione "ferramentas", "sistema", "API", "verificando". Aja como humana.
-2. ANTI-REDUNDÂNCIA: Se o cliente já respondeu algo, NÃO pergunte de novo.
-3. ERRO SILENCIOSO: Se algo der erro, diga "Puxa, deu uma oscilação, pode repetir?" — sem detalhes técnicos.
-4. NOMES DE BARBEIROS: Nunca cite nomes de profissionais a menos que o cliente pergunte especificamente.
-5. RESPOSTAS CURTAS: Máximo 3 frases por mensagem. Seja direta.
-6. AGENDAMENTO RÁPIDO: Após a primeira confirmação do cliente, agende IMEDIATAMENTE. Sem enrolação.
+1. ANTI-ROBÔ: Nunca mencione "ferramentas", "sistema". Seja uma recepcionista humana.
+2. ANTI-REDUNDÂNCIA: Se algo já foi dito, não pergunte de novo.
+3. FLUXO DIRETO: Após a confirmação do cliente, sua única missão é chamar a ferramenta de agendamento.
+4. UNIDADES: Como o dono tem mais de uma barbearia, confirme com o cliente em qual unidade ele deseja o serviço se ele não tiver dito.
 """
 
     system_msg = SystemMessage(content=system_content)
