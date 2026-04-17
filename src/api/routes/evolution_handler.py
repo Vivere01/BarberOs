@@ -56,9 +56,17 @@ async def handle_evolution_webhook(
     
     # Tratamento de Áudio
     message_type = message_data.get("messageType", "")
-    if "audio" in message_type.lower() or message.get("audioMessage"):
+    is_audio = "audio" in message_type.lower() or message.get("audioMessage")
+    
+    if is_audio:
+        # Busca recursiva/exaustiva pelo base64 em diferentes versões da Evolution API
         audio_info = message.get("audioMessage", {})
-        base64_audio = message_data.get("base64") or audio_info.get("base64")
+        base64_audio = (
+            data.get("base64") or 
+            message_data.get("base64") or 
+            audio_info.get("base64") or
+            message.get("base64")
+        )
         
         if base64_audio:
             logger.info(f"EVOLUTION_IN: Áudio recebido ({len(base64_audio)} chars). Iniciando transcrição...")
