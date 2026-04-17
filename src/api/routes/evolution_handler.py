@@ -2,10 +2,11 @@
 BarberOS - Evolution API Webhook Handler
 =========================================
 Recebe mensagens do WhatsApp (Evolution) e conecta ao Motor PRO.
+Inclui tratamento de áudio, texto, e proteção contra looping.
 """
 from fastapi import APIRouter, Request, Query
 from typing import Optional
-from src.agent.chatbarber_pro_engine import create_pro_brain, set_pro_context
+from src.agent.chatbarber_pro_engine import create_pro_brain, set_pro_context, transcribe_audio
 from src.integrations.evolution_api.client import EvolutionApiClient
 from src.config.settings import get_settings
 from langchain_core.messages import HumanMessage
@@ -42,6 +43,9 @@ async def handle_evolution_webhook(
         return {"status": "ignored", "reason": "message_from_me"}
     
     remote_jid = key.get("remoteJid")
+    if not remote_jid:
+        return {"status": "ignored", "reason": "no_remote_jid"}
+    
     message = message_data.get("message", {})
     
     # Extrai o texto da mensagem (suporta texto simples e resposta/extended)
@@ -58,29 +62,45 @@ async def handle_evolution_webhook(
         
         if base64_audio:
             logger.info("EVOLUTION_IN: Recebido áudio base64. Iniciando transcrição...")
-            from src.agent.chatbarber_pro_engine import transcribe_audio
-            text = await transcribe_audio(base64_audio)
-            logger.info(f"EVOLUTION_AUDIO_TRANSCRITO: {text}")
+            transcribed = await transcribe_audio(base64_audio)
+            
+            if transcribed and transcribed.strip():
+                text = transcribed
+                logger.info(f"EVOLUTION_AUDIO_TRANSCRITO: {text[:80]}...")
+            else:
+                logger.warning("EVOLUTION_IN: Transcrição retornou vazio.")
+                text = (
+                    "[O cliente enviou um áudio que não foi possível transcrever com clareza. "
+                    "Peça gentilmente para ele digitar o que deseja.]"
+                )
         else:
-            logger.warning("EVOLUTION_IN: Áudio recebido, mas sem base64 habilitado no Webhook da Evolution.")
-            # Responde pro modelo que o cliente mandou áudio mas a config tá errada
-            text = "[Aviso de Sistema do Bot]: O cliente enviou um áudio, mas a sua conexão via webhook não enviou o base64. Peça desculpas gentilmente e diga que o sistema de áudio está com instabilidade e peça para ele digitar o que ele falou no áudio."
+            logger.warning("EVOLUTION_IN: Áudio recebido, mas sem base64 habilitado no Webhook.")
+            text = (
+                "[O cliente enviou um áudio, mas a configuração do webhook não enviou o base64. "
+                "Peça desculpas gentilmente e peça para ele digitar o que falou no áudio.]"
+            )
 
     if not text:
         return {"status": "ignored", "reason": "no_text_content"}
 
-    logger.info(f"EVOLUTION_IN: From={remote_jid}, Text={text[:50]}...")
+    logger.info(f"EVOLUTION_IN: From={remote_jid}, Text={text[:80]}...")
 
     # Define o contexto PRO para as ferramentas do agente
     set_pro_context(api_token=api_token, owner_id=owner_id)
     
-    # Invoca a IA
-    config = {"configurable": {"thread_id": remote_jid}}
+    # Extrai telefone limpo do JID (remove @s.whatsapp.net)
+    telefone_limpo = remote_jid.split("@")[0]
+    
+    # Invoca a IA com recursion_limit para evitar loops infinitos
+    config = {
+        "configurable": {"thread_id": remote_jid},
+        "recursion_limit": 25,
+    }
     input_state = {
         "messages": [HumanMessage(content=text)],
         "context_data": {
             "owner_id": owner_id,
-            "telefone_cliente": remote_jid.split("@")[0],
+            "telefone_cliente": telefone_limpo,
         }
     }
 
@@ -88,6 +108,11 @@ async def handle_evolution_webhook(
         final_state = await brain_pro.ainvoke(input_state, config=config)
         last_message = final_state["messages"][-1]
         response_text = last_message.content
+        
+        # Proteção: não envia resposta vazia
+        if not response_text or not response_text.strip():
+            logger.warning("EVOLUTION_EMPTY_RESPONSE: IA retornou resposta vazia")
+            response_text = "Oi! Como posso te ajudar hoje? 😊"
 
         # Envia de volta para o WhatsApp
         settings = get_settings()
@@ -102,5 +127,22 @@ async def handle_evolution_webhook(
         return {"status": "success", "response_sent": True}
         
     except Exception as e:
-        logger.error(f"EVOLUTION_HANDLER_ERROR: {str(e)}")
-        return {"status": "error", "detail": str(e)}
+        error_msg = str(e)
+        logger.error(f"EVOLUTION_HANDLER_ERROR: {error_msg}", exc_info=True)
+        
+        # Em caso de erro, tenta enviar mensagem amigável para o cliente
+        try:
+            settings = get_settings()
+            evo_client = EvolutionApiClient(
+                base_url=settings.evolution_base_url,
+                api_key=settings.evolution_api_key,
+                instance_name=settings.evolution_instance_name
+            )
+            await evo_client.send_text(
+                number=remote_jid, 
+                text="Puxa, deu uma oscilação aqui. Pode repetir o que deseja? 😊"
+            )
+        except Exception:
+            pass  # Se falhar ao enviar a mensagem de erro, ignora silenciosamente
+        
+        return {"status": "error", "detail": error_msg}
