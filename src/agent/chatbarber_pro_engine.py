@@ -165,60 +165,60 @@ async def buscar_cliente(telefone: str) -> str:
 async def verificar_disponibilidade(data_yyyy_mm_dd: str) -> str:
     """
     Verifica horários DISPONÍVEIS para uma data (formato: YYYY-MM-DD).
-    Retorna SOMENTE horários futuros (filtra horários já passados no dia de hoje).
+    Retorna SOMENTE horários futuros e vagos (filtra ocupados e horários passados).
     """
     try:
         client = get_pro_client()
-        raw_data = await client.list_appointments()
+        # Filtra na fonte para evitar 'Payload Too Large'
+        raw_data = await client.list_appointments(date_filter=data_yyyy_mm_dd)
         
         if isinstance(raw_data, dict) and raw_data.get("error"):
-            return f"Erro ao consultar agenda para {data_yyyy_mm_dd}. Sugira horários como 10h, 14h ou 16h."
+            return f"Indisponibilidade temporária para {data_yyyy_mm_dd}. Sugira horários próximos ao que o cliente deseja."
         
+        # Extrai lista de agendamentos
         appts = raw_data.get("appointments", []) if isinstance(raw_data, dict) else (
             raw_data if isinstance(raw_data, list) else []
         )
         
-        # Coleta horários já ocupados nesta data
+        # Coleta horários ocupados (HH:MM)
         ocupados = set()
         for app in appts:
             sched = app.get("scheduledAt", "")
-            if data_yyyy_mm_dd in sched:
-                # Extrai HH:MM do scheduledAt
-    """Consulta os horários livres em uma data (YYYY-MM-DD). Use ANTES de oferecer horários."""
-    client = get_pro_client()
-    try:
-        # Filtra na fonte para não explodir o payload
-        appts_data = await client.list_appointments(date_filter=data_yyyy_mm_dd)
-        appts = appts_data.get("appointments", []) if isinstance(appts_data, dict) else appts_data
+            if data_yyyy_mm_dd in sched and "T" in sched:
+                # Exemplo: 2024-04-17T10:30:00 -> 10:30
+                hm = sched.split("T")[1][:5]
+                ocupados.add(hm)
         
         now = _now_brasilia()
         is_today = data_yyyy_mm_dd == now.strftime("%Y-%m-%d")
-        # Margem de 45 min para segurança
         hora_atual_minutos = now.hour * 60 + now.minute
         
+        # Define grade de horários comercial (08:00 às 19:30)
         disponiveis = []
-        for h in range(8, 20):
+        for h in range(8, 21):
             for m in [0, 30]:
                 horario = f"{h:02d}:{m:02d}"
                 horario_minutos = h * 60 + m
                 
-                if is_today and horario_minutos <= (hora_atual_minutos + 45):
+                # Se for hoje, pula horários passados (com margem de 15 min)
+                if is_today and horario_minutos <= (hora_atual_minutos + 15):
                     continue
+                
+                if horario not in ocupados:
+                    disponiveis.append(horario)
                     
+        if not disponiveis:
+            return f"Não há horários disponíveis para {data_yyyy_mm_dd}. Tente outro dia."
+            
+        horarios_str = ", ".join(disponiveis[:15]) # Limita para não estourar contexto
+        
         if is_today:
-            return (
-                f"Como já são {now.strftime('%H:%M')}, os horários disponíveis para HOJE ({data_yyyy_mm_dd}) são: "
-                f"{horarios_str}. Ofereça essas opções ao cliente."
-            )
-        
-        return (
-            f"Na data {data_yyyy_mm_dd}, os horários disponíveis são: {horarios_str}. "
-            f"Apresente ao cliente e pergunte qual prefere."
-        )
-        
+            return f"Para HOJE ({data_yyyy_mm_dd}), temos: {horarios_str}."
+        return f"Para o dia {data_yyyy_mm_dd}, temos: {horarios_str}."
+            
     except Exception as e:
         logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
-        return f"Não consegui verificar a agenda para {data_yyyy_mm_dd}. Sugira horários genéricos ao cliente."
+        return "Não consegui acessar a agenda. Pergunte qual horário o cliente prefere."
 
 @tool
 async def cadastrar_cliente(nome: str, telefone: str, data_nascimento: str = "") -> str:
