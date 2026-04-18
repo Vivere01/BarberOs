@@ -19,49 +19,28 @@ _RETRY_BACKOFF_BASE = 1.0  # segundos
 
 class ChatBarberProClient:
     """
-    Client para a API do ChatBarber PRO com:
-    - Connection pooling (reutiliza conexões HTTP)
-    - Timeout configurável (evita hanging indefinido)
-    - Retry com exponential backoff (resiliência a erros transitórios)
-    - Cache de clientes para busca rápida por telefone
+    Client simplificado para a API da conta do ChatBarber PRO.
     """
     
-    # Connection pool compartilhado entre instâncias (mesmo base_url)
     _shared_clients: Dict[str, httpx.AsyncClient] = {}
     
-    def __init__(self, api_token: str, owner_id: str, base_url: str = "https://www.chatbarber.pro"):
-        self.api_token = api_token
-        self.owner_id = owner_id
+    def __init__(self, api_key: str, base_url: str = "https://www.chatbarber.pro"):
+        self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.headers = {
-            "Authorization": f"Bearer {api_token}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
     
     def _get_pooled_client(self) -> httpx.AsyncClient:
-        """Reutiliza client HTTP pela base_url (connection pooling)."""
-        key = f"{self.base_url}:{self.api_token[:8]}"
+        key = f"{self.base_url}"
         if key not in self._shared_clients or self._shared_clients[key].is_closed:
-            self._shared_clients[key] = httpx.AsyncClient(
-                timeout=_DEFAULT_TIMEOUT,
-                limits=httpx.Limits(
-                    max_connections=10,
-                    max_keepalive_connections=5,
-                    keepalive_expiry=30.0
-                ),
-                follow_redirects=True
-            )
+            self._shared_clients[key] = httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT)
         return self._shared_clients[key]
 
     async def _request_with_retry(self, method: str, endpoint: str, 
                                    data: Optional[Dict] = None) -> Dict[str, Any]:
-        """
-        Executa request HTTP com retry automático e backoff exponencial.
-        
-        Retry em: timeout, 5xx, connection errors.
-        NÃO retry em: 4xx (erro do cliente — dados inválidos).
-        """
-        url = f"{self.base_url}/api/v1/{self.owner_id}/{endpoint}"
+        url = f"{self.base_url}/api/v1/{endpoint}"
         client = self._get_pooled_client()
         last_error = None
         

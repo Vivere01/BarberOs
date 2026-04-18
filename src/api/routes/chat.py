@@ -21,46 +21,48 @@ class ChatInput(BaseModel):
     message: str
     phone: str
     persona: Optional[str] = None
-    barbershop_context: Optional[Any] = None
-    inbox_do_cliente: Optional[str] = None
-    contact_id: Optional[str] = None
-    conversation_id: Optional[str] = None
-    id_cliente_cashbarber: Optional[str] = None
-    api_token: Optional[str] = None
-    owner_id: Optional[str] = None
+    pro_api_key: Optional[str] = None
+    instance_name: Optional[str] = None
+    evolution_apikey: Optional[str] = None
+    metadata: Optional[dict] = None
 
 
 @router.post("/chat")
 async def process_chat(request: ChatInput):
-    # Log ultra detalhado para capturar o que o N8N está enviando
-    logger.info("="*50)
-    logger.info(f"DADOS_RECEBIDOS_N8N: {request.model_dump_json(indent=2)}")
-    logger.info("="*50)
+    # Log dos dados para conferência
+    logger.info(f"REQUEST_RECEBIDO: WhatsApp {request.phone} | Instance: {request.instance_name}")
     
     config = {"configurable": {"thread_id": request.phone}}
 
-    # ★ Injeta contexto Chatwoot e PRO nas tools ANTES de invocar o brain
+    # Injeta contexto Evolution e PRO
     set_session_context(
-        api_token=request.api_token,
-        owner_id=request.owner_id,
-        inbox=request.inbox_do_cliente,
-        contact_id=request.contact_id,
-        conversation_id=request.conversation_id,
-        system_info=request.barbershop_context
+        pro_api_key=request.pro_api_key,
+        instance_name=request.instance_name,
+        evolution_apikey=request.evolution_apikey,
+        phone=request.phone,
+        metadata=request.metadata
     )
 
     input_state = {
         "messages": [HumanMessage(content=request.message)],
-        "context_data": {
-            "persona": request.persona,
-            "system_info": request.barbershop_context,
-            "inbox_do_cliente": request.inbox_do_cliente,
-            "contact_id": request.contact_id,
-            "conversation_id": request.conversation_id,
-            "id_cliente_cashbarber": request.id_cliente_cashbarber,
-            "telefone_cliente": request.phone,
-        },
-        "needs_human": False
+        "conversation_id": request.phone,
+        "barbershop_id": request.instance_name or "default",
+        "system_type": "pro",
+        "client_info": {"phone": request.phone},
+        "current_intent": "unknown",
+        "intent_confidence": 0.0,
+        "previous_intents": [],
+        "conversation_stage": "initial",
+        "turn_count": 0,
+        "appointment_request": {},
+        "scheduling_data": {},
+        "agent_response": "",
+        "response_type": "text",
+        "guardrail_result": {},
+        "errors": [],
+        "last_error": {},
+        "retrieved_knowledge": [],
+        "metadata": {"persona": request.persona}
     }
 
     # Limite de recursão padrão do LangGraph é 25. 5 era muito baixo para agentes com ferramentas.

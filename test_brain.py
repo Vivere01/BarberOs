@@ -13,23 +13,22 @@ async def test_brain():
     brain = create_full_brain()
     config = {"configurable": {"thread_id": "test_phone"}}
 
-    # ★ Simula contexto Chatwoot (valores de teste)
+    # ★ Simula contexto Evolution e PRO
     set_session_context(
-        api_token="TEST_TOKEN",
-        owner_id="TEST_OWNER",
-        inbox="INBOX_TESTE",
-        contact_id="CONTATO_TESTE",
-        conversation_id="CONVERSA_TESTE",
+        pro_api_key="TEST_PRO_KEY",
+        instance_name="CONTATO_TESTE",
+        evolution_apikey="TEST_EVO_KEY",
+        phone="5511999999999"
     )
 
     input_state = {
-        "messages": [HumanMessage(content="Oi! Eu ouvi dizer que tem uma promoção de time de futebol? Como funciona?")],
-        "conversation_id": "test_conv_id",
+        "messages": [HumanMessage(content="Oi! Quais são os preços?")],
+        "conversation_id": "5511999999999",
         "barbershop_id": "CONTATO_TESTE",
         "system_type": "pro",
-        "client_info": {"phone": "test_phone"},
-        "current_intent": "greeting",
-        "intent_confidence": 1.0,
+        "client_info": {"phone": "5511999999999"},
+        "current_intent": "unknown",
+        "intent_confidence": 0.0,
         "previous_intents": [],
         "conversation_stage": "initial",
         "turn_count": 0,

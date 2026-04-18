@@ -36,21 +36,19 @@ logger = get_logger("agent.full_engine")
 _session_ctx: ContextVar[dict] = ContextVar("barberos_session", default={})
 
 def set_session_context(
-    api_token: Optional[str] = None,
-    owner_id: Optional[str] = None,
-    inbox: Optional[str] = None,
-    contact_id: Optional[str] = None,
-    conversation_id: Optional[str] = None,
-    system_info: Optional[dict] = None
+    pro_api_key: Optional[str] = None,
+    instance_name: Optional[str] = None,
+    evolution_apikey: Optional[str] = None,
+    phone: Optional[str] = None,
+    metadata: Optional[dict] = None
 ):
     """Configura as credenciais e contexto para o request atual."""
     _session_ctx.set({
-        "api_token": api_token,
-        "owner_id": owner_id,
-        "inbox": inbox,
-        "contact_id": contact_id,
-        "conversation_id": conversation_id,
-        "system_info": system_info or {},
+        "pro_api_key": pro_api_key,
+        "instance_name": instance_name,
+        "evolution_apikey": evolution_apikey,
+        "phone": phone,
+        "metadata": metadata or {},
     })
 
 def _ctx() -> dict:
@@ -58,14 +56,11 @@ def _ctx() -> dict:
 
 def get_pro_client() -> ChatBarberProClient:
     ctx = _ctx()
-    token = ctx.get("api_token")
-    owner = ctx.get("owner_id")
-    if not token or not owner:
-        # Fallback para settings se não estiver no contexto (para testes)
+    key = ctx.get("pro_api_key")
+    if not key:
         settings = get_settings()
-        token = token or settings.uzapi_token # Exemplo
-        owner = owner or "default_owner"
-    return ChatBarberProClient(api_token=token, owner_id=owner)
+        key = settings.openai_api_key # Fallback de teste apenas
+    return ChatBarberProClient(api_key=key)
 
 # ===================================================================
 # Helpers de Data/Hora (Brasília)
