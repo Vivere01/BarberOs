@@ -17,8 +17,8 @@ async def test_helena():
 
     # --- CONFIGURAÇÃO DO AGENTE (MULTI-TENANT) ---
     # Aqui você simula o que o seu sistema enviaria para criar este agente
-    PRO_API_KEY = "SUA_CHAVE_PRO_AQUI" # Substitua pela sua chave real se quiser testar agendamento
-    INSTANCE_EVO = "CONTATO_TESTE"
+    PRO_API_KEY = "cmn90566j0000uaj5aouwhwtn" # Token que você me mandou
+    INSTANCE_EVO = "dev-owner-1774622040714" # ID que você me mandou
     PERSONA = "Você é a Helena, assistente virtual da barbearia Navalha & Estilo. Seja educada e foque em ajudar com agendamentos."
 
     brain = create_full_brain()
