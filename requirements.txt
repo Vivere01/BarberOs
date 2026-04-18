@@ -3,6 +3,9 @@ uvicorn
 langgraph
 langchain
 langchain-openai
+langchain-community
+langchain-chroma
+watchdog
 httpx
 python-dotenv
 pydantic-settings
@@ -10,7 +13,5 @@ beautifulsoup4
 playwright
 loguru
 structlog
-langchain-groq
-langchain-openai
-groq
 openai
+pyyaml

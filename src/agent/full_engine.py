@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from langgraph.graph import StateGraph, END
 from operator import add
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import ToolNode
 
 from langchain_openai import ChatOpenAI
@@ -25,6 +25,8 @@ from langchain_core.tools import tool
 from src.config.settings import get_settings
 from src.config.logging_config import get_logger
 from src.integrations.chatbarber_pro.client import ChatBarberProClient
+from src.agent.nodes.knowledge import retrieve_knowledge
+from src.agent.state import AgentState
 
 logger = get_logger("agent.full_engine")
 
@@ -153,11 +155,7 @@ tool_node = ToolNode(tools)
 # ===================================================================
 # Estado do Agente
 # ===================================================================
-class AgentState(TypedDict):
-    messages: Annotated[List[BaseMessage], add]
-    context_data: dict
-    current_intent: Optional[str]
-    next_node: Optional[str]
+# AgentState importado de src.agent.state
 
 # ===================================================================
 # NODES DA ESTRUTURA MULTI-AGENTE
@@ -182,13 +180,10 @@ async def router_node(state: AgentState):
     intent = res.content.lower().strip()
     
     # Determina o próximo nó baseado na intenção
-    next_node = "receptionist"
     if "agendamento" in intent:
-        next_node = "scheduler"
-    elif "faq" in intent:
-        next_node = "receptionist"
-        
-    return {"current_intent": intent, "next_node": next_node}
+        return {"current_intent": intent} # O Grafo decidirá baseado no intent
+    
+    return {"current_intent": intent}
 
 async def receptionist_node(state: AgentState):
     """Agente de Boas-vindas e FAQ."""
@@ -196,14 +191,15 @@ async def receptionist_node(state: AgentState):
     llm = ChatOpenAI(model=settings.openai_model, temperature=0.7).bind_tools(tools)
     
     dt_ctx = _get_datetime_context()
-    persona = state.get("context_data", {}).get("persona", "Você é a Ana, recepcionista da barbearia.")
+    persona = state.get("metadata", {}).get("persona", "Você é a Ana, recepcionista da barbearia.")
+    knowledge = "\n".join(state.get("retrieved_knowledge", []))
     
     system_msg = SystemMessage(content=(
         f"{dt_ctx}\n\n"
         f"--- PERSONA ---\n{persona}\n\n"
+        f"--- CONHECIMENTO ADICIONAL (WIKI) ---\n{knowledge}\n\n"
         "Seu objetivo é ser simpática e identificar o que o cliente deseja.\n"
-        "Se for um cliente novo, use 'buscar_cliente' se tiver o telefone.\n"
-        "Se for dúvida de preços, use 'consultar_servicos'."
+        "Use o conhecimento acima para responder dúvidas sobre a barbearia."
     ))
     
     messages = [system_msg] + state["messages"]
@@ -216,8 +212,11 @@ async def scheduler_node(state: AgentState):
     llm = ChatOpenAI(model=settings.openai_model, temperature=0).bind_tools(tools)
     
     dt_ctx = _get_datetime_context()
+    knowledge = "\n".join(state.get("retrieved_knowledge", []))
+    
     system_msg = SystemMessage(content=(
         f"{dt_ctx}\n\n"
+        f"--- REGRAS DA BARBEARIA ---\n{knowledge}\n\n"
         "Você é o especialista em agendamentos.\n"
         "Siga o fluxo:\n"
         "1. Identifique serviço e profissional.\n"
@@ -242,13 +241,17 @@ def should_continue(state: AgentState):
     return END
 
 def route_to_agent(state: AgentState):
-    return state.get("next_node", "receptionist")
+    intent = state.get("current_intent", "greeting")
+    if "agendamento" in intent:
+        return "scheduler"
+    return "receptionist"
 
 def create_full_brain():
     workflow = StateGraph(AgentState)
     
     # Adiciona nós
     workflow.add_node("router", router_node)
+    workflow.add_node("knowledge", retrieve_knowledge)
     workflow.add_node("receptionist", receptionist_node)
     workflow.add_node("scheduler", scheduler_node)
     workflow.add_node("tools", tool_node)
@@ -256,11 +259,19 @@ def create_full_brain():
     # Define bordas
     workflow.set_entry_point("router")
     
-    workflow.add_conditional_edges("router", route_to_agent)
+    # Roteia para o cérebro primeiro para ganhar contexto
+    workflow.add_edge("router", "knowledge")
+    
+    # Depois do cérebro, vai para o agente especializado
+    workflow.add_conditional_edges("knowledge", route_to_agent)
     
     workflow.add_conditional_edges("receptionist", should_continue)
     workflow.add_conditional_edges("scheduler", should_continue)
     
-    workflow.add_edge("tools", "scheduler") # Tools de agendamento voltam pro scheduler
+    # Tools sempre respondem para o nó que os chamou (neste caso scheduler)
+    workflow.add_edge("tools", "scheduler")
     
+    # Nota: SqliteSaver real requer async context manager no main.py
+    # Por segurança no teste síncrono, mantemos MemorySaver aqui
+    from langgraph.checkpoint.memory import MemorySaver
     return workflow.compile(checkpointer=MemorySaver())

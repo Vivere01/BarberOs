@@ -23,15 +23,25 @@ async def test_brain():
     )
 
     input_state = {
-        "messages": [HumanMessage(content="Vamos testar")],
-        "context_data": {
-            "persona": "Você é a Ana, assistente virtual da barbearia.",
-            "system_info": {"unidades": [{"id": "1", "nome": "Colorado"}]},
-            "inbox_do_cliente": "INBOX_TESTE",
-            "contact_id": "CONTATO_TESTE",
-            "conversation_id": "CONVERSA_TESTE",
-        },
-        "needs_human": False
+        "messages": [HumanMessage(content="Oi! Eu ouvi dizer que tem uma promoção de time de futebol? Como funciona?")],
+        "conversation_id": "test_conv_id",
+        "barbershop_id": "CONTATO_TESTE",
+        "system_type": "pro",
+        "client_info": {"phone": "test_phone"},
+        "current_intent": "greeting",
+        "intent_confidence": 1.0,
+        "previous_intents": [],
+        "conversation_stage": "initial",
+        "turn_count": 0,
+        "appointment_request": {},
+        "scheduling_data": {},
+        "agent_response": "",
+        "response_type": "text",
+        "guardrail_result": {},
+        "errors": [],
+        "last_error": {},
+        "retrieved_knowledge": [],
+        "metadata": {"persona": "Você é a Ana, assistente virtual da barbearia."}
     }
 
     print("Iniciando invoke...")
