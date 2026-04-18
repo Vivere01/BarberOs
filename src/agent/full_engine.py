@@ -159,7 +159,9 @@ tool_node = ToolNode(tools)
 async def router_node(state: AgentState):
     """Analisa a entrada e decide qual sub-agente deve responder."""
     settings = get_settings()
-    llm = ChatOpenAI(model=settings.openai_model, temperature=0)
+    # Pega a chave de qualquer um dos campos (minúsculo ou maiúsculo)
+    api_key = settings.openai_api_key or settings.OPENAI_API_KEY
+    llm = ChatOpenAI(model=settings.openai_model, temperature=0, api_key=api_key)
     
     last_msg = state["messages"][-1].content
     
@@ -183,7 +185,8 @@ async def router_node(state: AgentState):
 async def receptionist_node(state: AgentState):
     """Agente de Boas-vindas e FAQ."""
     settings = get_settings()
-    llm = ChatOpenAI(model=settings.openai_model, temperature=0.7).bind_tools(tools)
+    api_key = settings.openai_api_key or settings.OPENAI_API_KEY
+    llm = ChatOpenAI(model=settings.openai_model, temperature=0.7, api_key=api_key).bind_tools(tools)
     
     dt_ctx = _get_datetime_context()
     persona = state.get("metadata", {}).get("persona", "Você é a Ana, recepcionista da barbearia.")
@@ -204,7 +207,8 @@ async def receptionist_node(state: AgentState):
 async def scheduler_node(state: AgentState):
     """Agente Especialista em Agendamento."""
     settings = get_settings()
-    llm = ChatOpenAI(model=settings.openai_model, temperature=0).bind_tools(tools)
+    api_key = settings.openai_api_key or settings.OPENAI_API_KEY
+    llm = ChatOpenAI(model=settings.openai_model, temperature=0, api_key=api_key).bind_tools(tools)
     
     dt_ctx = _get_datetime_context()
     knowledge = "\n".join(state.get("retrieved_knowledge", []))

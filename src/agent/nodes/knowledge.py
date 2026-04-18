@@ -34,7 +34,8 @@ async def retrieve_knowledge(state: AgentState) -> Dict[str, Any]:
         return {"retrieved_knowledge": []}
 
     try:
-        embeddings = OpenAIEmbeddings(openai_api_key=settings.openai_api_key)
+        api_key = settings.openai_api_key or settings.OPENAI_API_KEY
+        embeddings = OpenAIEmbeddings(openai_api_key=api_key)
         vectorstore = Chroma(
             persist_directory=persist_dir,
             embedding_function=embeddings,
@@ -45,7 +46,7 @@ async def retrieve_knowledge(state: AgentState) -> Dict[str, Any]:
         docs = vectorstore.similarity_search(last_message, k=3)
         knowledge_chunks = [d.page_content for d in docs]
         
-        logger.info(f"KNOWLEDGE_HIT: {len(knowledge_chunks)} trechos encontrados para {owner_id}")
+        logger.info(f"KNOWLEDGE_HIT: {len(knowledge_chunks)} trechos encontrados para {barbershop_id}")
         
         return {"retrieved_knowledge": knowledge_chunks}
         

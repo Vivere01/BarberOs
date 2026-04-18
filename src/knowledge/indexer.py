@@ -50,7 +50,8 @@ class VaultIndexer:
         splits = text_splitter.split_documents(documents)
         
         # 3. Gerar Embeddings e Salvar no ChromaDB
-        embeddings = OpenAIEmbeddings(openai_api_key=self.settings.openai_api_key)
+        api_key = self.settings.openai_api_key or self.settings.OPENAI_API_KEY
+        embeddings = OpenAIEmbeddings(openai_api_key=api_key)
         
         # Limpa coleção anterior antes de re-indexar (estratégia simples)
         vectorstore = Chroma.from_documents(
