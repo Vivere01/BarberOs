@@ -26,6 +26,8 @@ class ChatInput(BaseModel):
     contact_id: Optional[str] = None
     conversation_id: Optional[str] = None
     id_cliente_cashbarber: Optional[str] = None
+    api_token: Optional[str] = None
+    owner_id: Optional[str] = None
 
 
 @router.post("/chat")
@@ -37,12 +39,13 @@ async def process_chat(request: ChatInput):
     
     config = {"configurable": {"thread_id": request.phone}}
 
-    # ★ Injeta contexto Chatwoot nas tools ANTES de invocar o brain
+    # ★ Injeta contexto Chatwoot e PRO nas tools ANTES de invocar o brain
     set_session_context(
+        api_token=request.api_token,
+        owner_id=request.owner_id,
         inbox=request.inbox_do_cliente,
         contact_id=request.contact_id,
         conversation_id=request.conversation_id,
-        id_cliente_cashbarber=request.id_cliente_cashbarber,
         system_info=request.barbershop_context
     )
 

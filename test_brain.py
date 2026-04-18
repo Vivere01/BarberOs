@@ -15,6 +15,8 @@ async def test_brain():
 
     # ★ Simula contexto Chatwoot (valores de teste)
     set_session_context(
+        api_token="TEST_TOKEN",
+        owner_id="TEST_OWNER",
         inbox="INBOX_TESTE",
         contact_id="CONTATO_TESTE",
         conversation_id="CONVERSA_TESTE",
