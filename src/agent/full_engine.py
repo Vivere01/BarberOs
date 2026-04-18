@@ -56,11 +56,12 @@ def _ctx() -> dict:
 
 def get_pro_client() -> ChatBarberProClient:
     ctx = _ctx()
-    key = ctx.get("pro_api_key")
-    if not key:
-        settings = get_settings()
-        key = settings.openai_api_key # Fallback de teste apenas
-    return ChatBarberProClient(api_key=key)
+    settings = get_settings()
+    return ChatBarberProClient(
+        api_key=ctx.get("pro_api_key") or settings.openai_api_key,
+        owner_id=ctx.get("instance_name"),
+        base_url=settings.cashbarber_base_url
+    )
 
 # ===================================================================
 # Helpers de Data/Hora (Brasília)
