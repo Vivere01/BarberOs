@@ -90,7 +90,7 @@ async def consultar_unidades() -> list:
 async def buscar_cliente(telefone: str) -> dict:
     "Busca cadastro do cliente pelo telefone no ChatBarber PRO."
     client = get_pro_client()
-    return await client.search_client_by_phone(telefone)
+    return await client.get_client_by_phone(telefone)
 
 @tool
 async def consultar_servicos() -> list:
@@ -109,7 +109,7 @@ async def buscar_disponibilidade(data: str) -> list:
     "Busca horários vagos para uma data específica (YYYY-MM-DD)."
     client = get_pro_client()
     # No PRO, list_appointments retorna ocupados, temos que inferir vagos
-    res = await client.list_appointments(date_filter=data)
+    res = await client.list_appointments(date=data)
     # Lógica simplificada de disponibilidade: assume 08h-20h
     ocupados = [a.get("scheduledAt", "").split("T")[-1][:5] for a in res if "scheduledAt" in a]
     horarios = []
@@ -130,13 +130,15 @@ async def realizar_agendamento(
 ) -> dict:
     "Cria um agendamento real no ChatBarber PRO. Requer confirmação prévia."
     client = get_pro_client()
-    return await client.create_appointment(
-        client_id=client_id,
-        service_id=service_id,
-        staff_id=staff_id,
-        store_id=store_id,
-        scheduled_at=data_hora
-    )
+    data = {
+        "clientId": client_id,
+        "serviceId": service_id,
+        "staffId": staff_id,
+        "storeId": store_id,
+        "scheduledAt": data_hora,
+        "notes": "Agendamento via IA Helena"
+    }
+    return await client.create_appointment(data)
 
 tools = [
     consultar_unidades,
