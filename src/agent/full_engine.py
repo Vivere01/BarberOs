@@ -57,9 +57,9 @@ def get_pro_client() -> ChatBarberProClient:
     ctx = _ctx()
     settings = get_settings()
     return ChatBarberProClient(
-        api_key=ctx.get("pro_api_key") or settings.openai_api_key,
-        owner_id=ctx.get("instance_name"),
-        base_url=settings.cashbarber_base_url
+        api_key=ctx.get("pro_api_key") or settings.chatbarber_api_key,
+        owner_id=ctx.get("instance_name") or settings.chatbarber_owner_slug or settings.chatbarber_owner_id,
+        base_url=settings.chatbarber_base_url
     )
 
 # ===================================================================

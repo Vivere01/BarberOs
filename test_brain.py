@@ -12,7 +12,7 @@ async def test_helena():
     na arquitetura de Fábrica de Agentes BarberOS.
     """
     print("\n" + "="*50)
-    print("🚀 BARBEROS - TESTE DE AGENTE IA (HELENA)")
+    print(" BARBEROS - TESTE DE AGENTE IA (HELENA)")
     print("="*50)
 
     # --- CONFIGURAÇÃO DO AGENTE (MULTI-TENANT) ---
@@ -32,8 +32,8 @@ async def test_helena():
 
     # 2. Simula uma mensagem de um cliente
     msg_cliente = "Oi! Queria ver os preços e horários para hoje."
-    print(f"\n👤 Cliente: {msg_cliente}")
-    print("🤖 Helena está processando...")
+    print(f"\nCliente: {msg_cliente}")
+    print("Helena está processando...")
 
     input_state = {
         "messages": [HumanMessage(content=msg_cliente)],
@@ -62,7 +62,7 @@ async def test_helena():
         result = await brain.ainvoke(input_state, config=config)
         
         resposta_final = result["messages"][-1].content
-        print(f"\n✨ RESPOSTA DA HELENA:\n{resposta_final}")
+        print(f"\n RESPOSTA DA HELENA:\n{resposta_final}")
         print("\n" + "="*50)
         
     except Exception as e:

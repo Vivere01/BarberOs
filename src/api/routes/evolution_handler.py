@@ -94,7 +94,12 @@ async def handle_evolution_webhook(
     logger.info(f"EVOLUTION_IN: From={remote_jid}, Text={text[:80]}...")
 
     # Define o contexto PRO para as ferramentas do agente
-    set_pro_context(api_token=api_token, owner_id=owner_id)
+    # Prioriza o slug do .env se estiver configurado
+    settings = get_settings()
+    effective_owner = settings.chatbarber_owner_slug or owner_id
+    effective_token = api_token or settings.chatbarber_api_key
+
+    set_pro_context(api_token=effective_token, owner_id=effective_owner)
     
     # Extrai telefone limpo do JID (remove @s.whatsapp.net)
     telefone_limpo = remote_jid.split("@")[0]

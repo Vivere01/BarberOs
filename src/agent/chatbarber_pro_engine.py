@@ -44,13 +44,14 @@ def get_pro_client() -> ChatBarberProClient:
     
     if not token or not owner:
         # Fallback para configurações globais se ausente no contexto
-        token = token or settings.openai_api_key
-        owner = owner or settings.evolution_instance_name # Use instance_name como default se for o caso
+        token = token or settings.chatbarber_api_key
+        # Prioriza o slug amigável se disponível
+        owner = owner or settings.chatbarber_owner_slug or settings.chatbarber_owner_id 
         
     return ChatBarberProClient(
         api_token=token, 
         owner_id=owner,
-        base_url=settings.cashbarber_base_url
+        base_url=settings.chatbarber_base_url
     )
 
 def set_pro_context(api_token: str, owner_id: str):
@@ -440,9 +441,9 @@ def call_model(state: AgentState):
 
 --- CONTEXTO OPERACIONAL EM TEMPO REAL ---
 {datetime_ctx}
-Telefone do Cliente: {telefone_cliente}
+Telefone do Cliente (WhatsApp): {telefone_cliente}
 
-Lembre-se: Você deve agir exatamente conforme as regras e fluxos definidos no seu Cérebro Obsidian acima.
+⚠️ INSTRUÇÃO CRUCIAL: Se você ainda não chamou a ferramenta 'buscar_cliente' nesta conversa ou se não sabe o ID do cliente, você DEVE chamá-la IMEDIATAMENTE usando o telefone acima antes de dar qualquer resposta de boas-vindas. NÃO peça dados se a ferramenta encontrar o cliente.
 """
 
     system_msg = SystemMessage(content=system_content)
