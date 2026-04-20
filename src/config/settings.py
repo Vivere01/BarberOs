@@ -48,21 +48,15 @@ class Settings(BaseSettings):
     # ── ChromaDB / Knowledge ─────────────────────
     chroma_persist_dir: str = Field(default="./data/chroma")
 
-    # ── Aliases de compatibilidade (código legado) ──
-    @property
-    def cashbarber_base_url(self) -> str:
-        """Alias para chatbarber_base_url — mantido para compat com engine antiga."""
-        return self.chatbarber_base_url
-
-    @property
-    def cashbarber_api_key(self) -> str:
-        return self.chatbarber_api_key
-
-    @property
-    def cashbarber_owner_id(self) -> str:
-        return self.chatbarber_owner_id
+    # ── Aliases legado (cashbarber → chatbarber) ─
+    # Código antigo no servidor referencia "cashbarber_*" ao invés de "chatbarber_*"
+    # Estes campos garantem compatibilidade até o código do servidor ser atualizado
+    cashbarber_base_url: str = Field(default="https://www.chatbarber.pro")
+    cashbarber_api_key: str = Field(default="")
+    cashbarber_owner_id: str = Field(default="")
 
 
 @lru_cache(maxsize=1)
 def get_settings():
     return Settings()
+
