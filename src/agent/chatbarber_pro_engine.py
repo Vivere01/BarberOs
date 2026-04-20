@@ -39,10 +39,19 @@ def get_pro_client() -> ChatBarberProClient:
     token = ctx.get("api_token")
     owner = ctx.get("owner_id")
     
+    from src.config.settings import get_settings
+    settings = get_settings()
+    
     if not token or not owner:
-        raise ValueError("Credenciais PRO ausentes no contexto da sessão.")
+        # Fallback para configurações globais se ausente no contexto
+        token = token or settings.openai_api_key
+        owner = owner or settings.evolution_instance_name # Use instance_name como default se for o caso
         
-    return ChatBarberProClient(api_token=token, owner_id=owner)
+    return ChatBarberProClient(
+        api_token=token, 
+        owner_id=owner,
+        base_url=settings.cashbarber_base_url
+    )
 
 def set_pro_context(api_token: str, owner_id: str):
     """Define as credenciais para o request atual."""
@@ -262,10 +271,23 @@ async def cadastrar_cliente(nome: str, telefone: str, data_nascimento: str = "")
         return "Erro no cadastro, mas vamos prosseguir com o agendamento."
 
 @tool
-async def agendar_horario(client_id: str, service_id: str, staff_id: str, store_id: str, data_isostring: str) -> str:
-    """CONFIRMA e cria o agendamento no sistema. SÓ use após o cliente dizer 'SIM' ou autorizar. Exige store_id da unidade."""
+async def agendar_horario(client_id: str, service_id: str, data_isostring: str, staff_id: str = "", store_id: str = "") -> str:
+    """CONFIRMA e cria o agendamento no sistema. SÓ use após o cliente dizer 'SIM' ou autorizar. Tente incluir staff_id e store_id se possível."""
     client = get_pro_client()
     try:
+        if not store_id:
+            stores = await client.list_stores()
+            if isinstance(stores, list) and len(stores) == 1:
+                store_id = str(stores[0].get("id", ""))
+                
+        if not staff_id:
+            staff = await client.list_staff()
+            if isinstance(staff, list) and len(staff) == 1:
+                staff_id = str(staff[0].get("id", ""))
+                
+        if not store_id or not staff_id:
+            return "ERRO DE VALIDAÇÃO: Faltou 'staff_id' ou 'store_id'. Use 'consultar_unidades' e 'consultar_profissionais' para descobrir os IDs, e pergunte ao cliente se necessário."
+
         res = await client.create_appointment(
             client_id=client_id,
             service_id=service_id,
@@ -273,9 +295,14 @@ async def agendar_horario(client_id: str, service_id: str, staff_id: str, store_
             store_id=store_id,
             scheduled_at=data_isostring
         )
-        if isinstance(res, dict) and res.get("status") in ["success", "created"]:
-            return "SUCESSO: Agendamento realizado com êxito."
-        return f"ERRO: A API retornou: {res.get('error', 'Erro desconhecido')}"
+        
+        if isinstance(res, dict):
+            if res.get("status") in ["success", "created"] or "id" in res or "appointment" in res:
+                return "SUCESSO: Agendamento realizado com êxito."
+            err = res.get("error") or res.get("detail") or res.get("message")
+            return f"ERRO: A API retornou: {err or 'Erro desconhecido'}"
+            
+        return f"ERRO: Resposta da API inesperada: {res}"
     except Exception as e:
         logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
         return f"ERRO_CONEXAO: {str(e)}"
@@ -361,8 +388,14 @@ def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
     start = 0
     for i, msg in enumerate(messages):
         if isinstance(msg, ToolMessage):
-            prev = messages[i - 1] if i > 0 else None
-            if prev is None or not (isinstance(prev, AIMessage) and getattr(prev, "tool_calls", None)):
+            has_ai_parent = False
+            for j in range(i - 1, -1, -1):
+                if isinstance(messages[j], AIMessage) and getattr(messages[j], "tool_calls", None):
+                    has_ai_parent = True
+                    break
+                if isinstance(messages[j], HumanMessage):
+                    break
+            if not has_ai_parent:
                 start = i + 1
         else:
             break
@@ -376,6 +409,15 @@ def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
 def call_model(state: AgentState):
     settings = get_settings()
     
+    # Carrega a Persona do arquivo (Finalizando a dúvida do usuário)
+    persona_path = "src/agent/prompts/chat_pro_persona.txt"
+    try:
+        with open(persona_path, "r", encoding="utf-8") as f:
+            base_persona = f.read()
+    except Exception as e:
+        logger.warning(f"Não consegui ler o arquivo de persona em {persona_path}: {e}")
+        base_persona = "Você é a Helena, recepcionista virtual simpática."
+
     llm = ChatOpenAI(
         model="gpt-4o-mini",
         temperature=0,
@@ -388,48 +430,17 @@ def call_model(state: AgentState):
     telefone_cliente = state.get('context_data', {}).get('telefone_cliente', '')
     datetime_ctx = _get_datetime_context()
     
-    # ===================================================================
-    # PERSONA E REGRAS — Reescrito para eliminar redundância (BUG #5)
-    # ===================================================================
-    system_content = f"""{datetime_ctx}
+    system_content = f"""{base_persona}
 
---- PERSONA ---
-Seu nome é Helena. Você é a recepcionista virtual da Barbearia. Fale como uma pessoa real, simpática e direta.
+--- CONTEXTO ATUAL ---
+{datetime_ctx}
+O telefone do cliente atual é: {telefone_cliente}
 
---- FLUXO DE ATENDIMENTO (SIGA EXATAMENTE) ---
-
-PASSO 1 — IDENTIFICAÇÃO AUTOMÁTICA:
-- O telefone deste cliente é: {telefone_cliente}
-- Na sua PRIMEIRA resposta, use a ferramenta 'buscar_cliente' com este número.
-- Se o cliente JÁ FOI ENCONTRADO no histórico, NÃO busque de novo.
-
-PASSO 2 — CADASTRO (só se buscar_cliente retornar "NÃO CADASTRADO"):
-- Peça NOME COMPLETO
-- Confirme o TELEFONE
-- Peça DATA DE NASCIMENTO (DD/MM/AAAA)
-- Use 'cadastrar_cliente' com esses dados (converta nascimento para YYYY-MM-DD)
-
-PASSO 3 — AGENDAMENTO:
-- Pergunte qual SERVIÇO deseja (use 'consultar_servicos' para obter IDs reais)
-- Pergunte a DATA desejada
-- Use 'verificar_disponibilidade' para mostrar horários livres
-- NUNCA ofereça horários que já passaram no dia de hoje
-- Use 'consultar_profissionais' para obter um staffId (seja discreto, não cite nomes a menos que o cliente peça)
-
-PASSO 4 — CONFIRMAÇÃO E AGENDAMENTO IMEDIATO:
-- Assim que o cliente escolher serviço + data + horário, você DEVE confirmar os detalhes.
-- Quando o cliente disser "sim", "pode", "ok" ou qualquer confirmação:
-  → Use a ferramenta 'agendar_horario' IMEDIATAMENTE.
-  → Você PRECISA do client_id, service_id, staff_id, store_id e o horário no formato ISO.
-  → Se não tiver o store_id, use 'consultar_unidades' primeiro.
-- Após o agendamento, confirme com: "Tudo pronto! Seu horário está marcado. Te espero lá! 💈"
-- Se a ferramenta retornar ERRO, explique brevemente o que houve e tente resolver.
-
---- REGRAS OBRIGATÓRIAS ---
-1. ANTI-ROBÔ: Nunca mencione "ferramentas", "sistema". Seja uma recepcionista humana.
-2. ANTI-REDUNDÂNCIA: Se algo já foi dito, não pergunte de novo.
-3. FLUXO DIRETO: Após a confirmação do cliente, sua única missão é chamar a ferramenta de agendamento.
-4. UNIDADES: Como o dono tem mais de uma barbearia, confirme com o cliente em qual unidade ele deseja o serviço se ele não tiver dito.
+--- REGRAS DE EXECUÇÃO ---
+1. Use 'buscar_cliente' sempre na primeira interação se não houver ID no histórico.
+2. Identifique Serviço e Unidade (store_id) antes de confirmar.
+3. Use 'agendar_horario' IMEDIATAMENTE após o "sim/ok" do cliente.
+4. Você PRECISA de: client_id, service_id, staff_id, store_id e data_isostring.
 """
 
     system_msg = SystemMessage(content=system_content)
