@@ -15,7 +15,6 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from langgraph.graph import StateGraph, END
 from operator import add
-from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.prebuilt import ToolNode
 
 from langchain_openai import ChatOpenAI
