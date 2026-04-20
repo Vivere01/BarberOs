@@ -409,13 +409,19 @@ def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
 def call_model(state: AgentState):
     settings = get_settings()
     
-    # Carrega a Persona do arquivo (Finalizando a dúvida do usuário)
-    persona_path = "src/agent/prompts/chat_pro_persona.txt"
+    # Carregamento do Cérebro via Obsidian Wiki (LLM Wiki)
+    vault_path = "knowledge/vaults/Brain/Helena"
     try:
-        with open(persona_path, "r", encoding="utf-8") as f:
-            base_persona = f.read()
+        with open(f"{vault_path}/Persona.md", "r", encoding="utf-8") as f:
+            persona_content = f.read()
+        with open(f"{vault_path}/Rules.md", "r", encoding="utf-8") as f:
+            rules_content = f.read()
+        with open(f"{vault_path}/Flows.md", "r", encoding="utf-8") as f:
+            flows_content = f.read()
+            
+        base_persona = f"{persona_content}\n\n{rules_content}\n\n{flows_content}"
     except Exception as e:
-        logger.warning(f"Não consegui ler o arquivo de persona em {persona_path}: {e}")
+        logger.warning(f"Wiki Brain não encontrado em {vault_path}, usando fallback: {e}")
         base_persona = "Você é a Helena, recepcionista virtual simpática."
 
     llm = ChatOpenAI(
@@ -432,15 +438,11 @@ def call_model(state: AgentState):
     
     system_content = f"""{base_persona}
 
---- CONTEXTO ATUAL ---
+--- CONTEXTO OPERACIONAL EM TEMPO REAL ---
 {datetime_ctx}
-O telefone do cliente atual é: {telefone_cliente}
+Telefone do Cliente: {telefone_cliente}
 
---- REGRAS DE EXECUÇÃO ---
-1. Use 'buscar_cliente' sempre na primeira interação se não houver ID no histórico.
-2. Identifique Serviço e Unidade (store_id) antes de confirmar.
-3. Use 'agendar_horario' IMEDIATAMENTE após o "sim/ok" do cliente.
-4. Você PRECISA de: client_id, service_id, staff_id, store_id e data_isostring.
+Lembre-se: Você deve agir exatamente conforme as regras e fluxos definidos no seu Cérebro Obsidian acima.
 """
 
     system_msg = SystemMessage(content=system_content)
