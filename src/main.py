@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes.webhook import router as webhook_router
+
 from src.api.routes.chat import router as chat_router
 from src.api.routes.chat_pro import router as chat_pro_router
 from src.api.routes.evolution_handler import router as evolution_router
@@ -102,7 +102,7 @@ app.include_router(health_router)
 app.include_router(chat_router, prefix="/api/v1")  # ★ Endpoint principal: POST /api/v1/chat
 app.include_router(chat_pro_router, prefix="/api/v1")  # ★ Novo: ChatBarber PRO
 app.include_router(evolution_router, prefix="/api/v1")  # ★ Novo: WhatsApp via Evolution
-app.include_router(webhook_router, prefix="/api/v1")  # Webhook legado (opcional)
+
 
 
 @app.get("/")
