@@ -184,58 +184,69 @@ async def buscar_cliente(telefone: str) -> str:
 
 @tool
 async def verificar_disponibilidade(data_yyyy_mm_dd: str) -> str:
-    """
-    Verifica horários DISPONÍVEIS para uma data (formato: YYYY-MM-DD).
-    Retorna SOMENTE horários futuros e vagos (filtra ocupados e horários passados).
-    """
+    \"\"\"
+    Verifica horários DISPONÍVEIS para uma data (YYYY-MM-DD).
+    Retorna horários agrupados por profissional para que o cliente possa escolher com quem agendar.
+    \"\"\"
     try:
         client = get_pro_client()
-        # Filtra na fonte para evitar 'Payload Too Large'
-        raw_data = await client.list_appointments(date_filter=data_yyyy_mm_dd)
         
-        if isinstance(raw_data, dict) and raw_data.get("error"):
-            return f"Indisponibilidade temporária para {data_yyyy_mm_dd}. Sugira horários próximos ao que o cliente deseja."
+        # 1. Busca Profissionais e Agendamentos
+        staff_list = await client.list_staff()
+        raw_appts = await client.list_appointments(date_filter=data_yyyy_mm_dd)
         
-        # Extrai lista de agendamentos
-        appts = raw_data.get("appointments", []) if isinstance(raw_data, dict) else (
-            raw_data if isinstance(raw_data, list) else []
-        )
+        if not staff_list:
+            return "Nenhum profissional cadastrado ou disponível no momento."
+            
+        appts = raw_appts.get("appointments", []) if isinstance(raw_appts, dict) else []
         
-        # Coleta horários ocupados (HH:MM)
-        ocupados = set()
+        # 2. Mapeia ocupação por profissional
+        ocupacao_por_staff = {str(s['id']): set() for s in staff_list if 'id' in s}
+        staff_names = {str(s['id']): s.get('name', 'Profissional') for s in staff_list if 'id' in s}
+        
         for app in appts:
+            s_id = str(app.get("staffId") or app.get("staff_id", ""))
             sched = app.get("scheduledAt", "")
-            if data_yyyy_mm_dd in sched and "T" in sched:
-                # Exemplo: 2024-04-17T10:30:00 -> 10:30
+            if s_id in ocupacao_por_staff and data_yyyy_mm_dd in sched and "T" in sched:
                 hm = sched.split("T")[1][:5]
-                ocupados.add(hm)
+                ocupacao_por_staff[s_id].add(hm)
         
+        # 3. Gera Grade para cada profissional
         now = _now_brasilia()
         is_today = data_yyyy_mm_dd == now.strftime("%Y-%m-%d")
         hora_atual_minutos = now.hour * 60 + now.minute
         
-        # Define grade de horários comercial (08:00 às 19:30)
-        disponiveis = []
-        for h in range(8, 21):
-            for m in [0, 30]:
-                horario = f"{h:02d}:{m:02d}"
-                horario_minutos = h * 60 + m
-                
-                # Se for hoje, pula horários passados (com margem de 15 min)
-                if is_today and horario_minutos <= (hora_atual_minutos + 15):
-                    continue
-                
-                if horario not in ocupados:
-                    disponiveis.append(horario)
-                    
-        if not disponiveis:
-            return f"Não há horários disponíveis para {data_yyyy_mm_dd}. Tente outro dia."
-            
-        horarios_str = ", ".join(disponiveis[:15]) # Limita para não estourar contexto
+        relatorio = [f"Disponibilidade para {data_yyyy_mm_dd}:"]
         
-        if is_today:
-            return f"Para HOJE ({data_yyyy_mm_dd}), temos: {horarios_str}."
-        return f"Para o dia {data_yyyy_mm_dd}, temos: {horarios_str}."
+        total_slots_count = 0
+        for s_id, ocupados in ocupacao_por_staff.items():
+            disp_staff = []
+            # Grade: 08:00 às 20:00 (ajustado para cobrir até 19:30+)
+            for h in range(8, 21):
+                for m in [0, 30]:
+                    horario = f"{h:02d}:{m:02d}"
+                    horario_minutos = h * 60 + m
+                    
+                    if is_today and horario_minutos <= (hora_atual_minutos + 10):
+                        continue
+                        
+                    if horario not in ocupados:
+                        disp_staff.append(horario)
+            
+            if disp_staff:
+                # Mostra até 30 horários por profissional para não cortar o final do dia
+                slots_txt = ", ".join(disp_staff[:30])
+                relatorio.append(f"- {staff_names[s_id]} (ID: {s_id}): {slots_txt}")
+                total_slots_count += len(disp_staff)
+                
+        if total_slots_count == 0:
+            return f"Não há horários disponíveis com nenhum profissional para {data_yyyy_mm_dd}."
+            
+        return "\n".join(relatorio)
+            
+    except Exception as e:
+        logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
+        return "Erro ao acessar a agenda. Tente sugerir um horário para eu verificar."
             
     except Exception as e:
         logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
@@ -437,14 +448,19 @@ def call_model(state: AgentState):
     telefone_cliente = state.get('context_data', {}).get('telefone_cliente', '')
     datetime_ctx = _get_datetime_context()
     
-    system_content = f"""{base_persona}
+    system_content = f\"\"\"{base_persona}
 
 --- CONTEXTO OPERACIONAL EM TEMPO REAL ---
 {datetime_ctx}
 Telefone do Cliente (WhatsApp): {telefone_cliente}
 
-⚠️ INSTRUÇÃO CRUCIAL: Se você ainda não chamou a ferramenta 'buscar_cliente' nesta conversa ou se não sabe o ID do cliente, você DEVE chamá-la IMEDIATAMENTE usando o telefone acima antes de dar qualquer resposta de boas-vindas. NÃO peça dados se a ferramenta encontrar o cliente.
-"""
+⚠️ INSTRUÇÕES CRUCIAIS DE AGENDAMENTO:
+1. IDENTIFICAÇÃO: Se não chamou 'buscar_cliente', faça isso IMEDIATAMENTE.
+2. MÚLTIPLAS UNIDADES: Se o sistema tiver mais de uma unidade/loja (use 'consultar_unidades'), você DEVE perguntar ao cliente em qual unidade ele deseja o atendimento antes de prosseguir.
+3. SERVIÇOS: Seja extremamente preciso ao selecionar o serviço. Se o cliente pedir 'Corte e Barba', procure pelo serviço correspondente na lista (use 'consultar_servicos'). Não invente e não use serviços errados como 'Sobrancelha' para pedidos de corte.
+4. PROFISSIONAIS: Mostre as opções de profissionais disponíveis para o horário escolhido. O cliente tem o direito de escolher. Se ele não tiver preferência, você pode sugerir um, mas informe que há outros.
+5. DISPONIBILIDADE: Ao verificar horários, informe quem são os profissionais disponíveis em cada horário.
+\"\"\"
 
     system_msg = SystemMessage(content=system_content)
 
