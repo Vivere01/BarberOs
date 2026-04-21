@@ -3,6 +3,14 @@ BarberOS - ChatBarber PRO API Client
 =====================================
 Client configurado para a arquitetura oficial do ChatBarber PRO:
 Padrão: https://{domain}/api/v1/{owner_id}/{endpoint}
+
+IMPORTANTE: A API retorna dados encapsulados:
+  - GET /services  → { count: N, services: [...] }
+  - GET /clients   → { count: N, clients: [...] }
+  - GET /staff     → { count: N, staff: [...] }
+  - POST /clients  → { success: true, client: { id, ... } }
+
+Este client desempacota automaticamente esses envelopes.
 """
 import httpx
 import logging
@@ -54,37 +62,65 @@ class ChatBarberProClient:
                 logger.error(f"CHATBARBERPRO_CONNECTION_ERROR: {str(e)} | URL: {url}")
                 return {"error": f"Erro de conexão com o servidor ChatBarber PRO: {str(e)}"}
 
+    def _unwrap(self, res: Any, key: str) -> list:
+        """
+        Desempacota resposta da API.
+        A API retorna { count: N, <key>: [...] } — extrai a lista interna.
+        Se já for lista, retorna direto. Se for erro, retorna [].
+        """
+        if isinstance(res, list):
+            return res
+        if isinstance(res, dict):
+            if "error" in res:
+                logger.warning(f"CHATBARBERPRO_UNWRAP: Resposta com erro para '{key}': {res.get('error')}")
+                return []
+            # Tenta extrair pelo nome da chave (ex: "services", "clients", "staff")
+            if key in res:
+                inner = res[key]
+                return inner if isinstance(inner, list) else []
+            # Se for um dict sem a chave esperada, mas com dados, retorna como lista de 1
+            if res.get("id"):
+                return [res]
+        return []
+
     # --- Endpoints ---
 
     async def list_clients(self) -> List[Dict]:
-        """GET /api/v1/{owner_id}/clients"""
+        """GET /api/v1/{owner_id}/clients → desempacota { count, clients: [...] }"""
         res = await self._request("GET", "clients")
-        if isinstance(res, dict) and "error" in res: return []
-        return res if isinstance(res, list) else []
+        return self._unwrap(res, "clients")
 
     async def search_client_by_phone(self, phone: str) -> Dict:
         """
-        Alias para buscar um cliente pelo telefone.
-        Tenta usar endpoint de busca se existir ou filtra na lista.
+        Busca um cliente pelo telefone.
+        1. Tenta GET /clients?phone=... (se a API suportar filtro)
+        2. Fallback: filtra manualmente na lista completa
         """
-        # Limpa o telefone
         clean_target = "".join(filter(str.isdigit, phone))
         
-        # Primeiro, tenta um GET /clients?phone=... (se existir na API)
+        # Tenta busca com parâmetro phone
         res = await self._request("GET", "clients", params={"phone": clean_target})
         
-        # Se retornar uma lista ou um objeto de cliente
-        if isinstance(res, list) and len(res) > 0:
-            return {"found": True, "id": res[0].get("id"), "name": res[0].get("name")}
-        if isinstance(res, dict) and res.get("id"):
-            return {"found": True, "id": res.get("id"), "name": res.get("name")}
-            
-        # Fallback: Varre a lista (ineficiente, mas seguro como último recurso)
-        clients = await self.list_clients()
-        for c in clients:
-            c_phone = "".join(filter(str.isdigit, str(c.get("phone", ""))))
-            if clean_target in c_phone or c_phone in clean_target:
-                return {"found": True, "id": c.get("id"), "name": c.get("name")}
+        # Desempacota a resposta (pode ser { count, clients: [...] } ou lista direta)
+        clients_list = self._unwrap(res, "clients")
+        
+        # Se a API filtrou e retornou resultado
+        if len(clients_list) > 0:
+            # Verifica se algum realmente bate com o telefone buscado
+            for c in clients_list:
+                c_phone = "".join(filter(str.isdigit, str(c.get("phone", ""))))
+                if clean_target in c_phone or c_phone in clean_target:
+                    return {"found": True, "id": c.get("id"), "name": c.get("name")}
+        
+        # Se a busca acima não funcionou (API pode ter retornado todos os clientes sem filtrar)
+        # Só faz fallback se a lista retornada não parece filtrada
+        if len(clients_list) == 0:
+            # Busca lista completa como último recurso
+            all_clients = await self.list_clients()
+            for c in all_clients:
+                c_phone = "".join(filter(str.isdigit, str(c.get("phone", ""))))
+                if clean_target in c_phone or c_phone in clean_target:
+                    return {"found": True, "id": c.get("id"), "name": c.get("name")}
                 
         return {"found": False}
 
@@ -96,7 +132,8 @@ class ChatBarberProClient:
     async def create_client(self, *args, **kwargs) -> Dict:
         """
         POST /api/v1/{owner_id}/clients
-        Suporta chamadas com dict (args[0]) ou argumentos nomeados (name, phone...).
+        Resposta esperada: { success: true, client: { id, name, ... } }
+        Retorna o objeto interno 'client' diretamente para facilitar extração do ID.
         """
         if args and isinstance(args[0], dict):
             payload = args[0]
@@ -106,29 +143,41 @@ class ChatBarberProClient:
                 "phone": kwargs.get("phone"),
                 "birth_date": kwargs.get("birth_date") or kwargs.get("data_nascimento")
             }
-        return await self._request("POST", "clients", data=payload)
+        
+        res = await self._request("POST", "clients", data=payload)
+        
+        # Desempacota: { success, client: { id, ... } } → retorna { id, ... }
+        if isinstance(res, dict) and "client" in res:
+            return res["client"]
+        return res
 
     async def list_appointments(self, date: Optional[str] = None, **kwargs) -> Dict:
         """GET /api/v1/{owner_id}/appointments"""
         date_val = date or kwargs.get("date_filter")
         params = {"date": date_val} if date_val else {}
         res = await self._request("GET", "appointments", params=params)
-        # Padroniza retorno para dict conforme esperado pelo engine
+        
+        # Desempacota para formato esperado pelo engine
         if isinstance(res, list):
             return {"appointments": res}
-        return res if isinstance(res, dict) else {"appointments": []}
+        if isinstance(res, dict):
+            # Se a API retornar { count, appointments: [...] }, já está ok
+            if "appointments" in res:
+                return res
+            # Se retornar { error: ... }
+            if "error" in res:
+                return res
+        return {"appointments": []}
 
     async def create_appointment(self, *args, **kwargs) -> Dict:
         """
         POST /api/v1/{owner_id}/appointments
-        Suporta chamadas com dict (args[0]) ou argumentos nomeados.
         Mapeia nomes para o padrão da API.
         """
         if args and isinstance(args[0], dict):
             payload = args[0]
         else:
-            # Mapeia nomes do full_engine e chatbarber_pro_engine
-            # Transforma em inteiro as strings que forem numéricas (para evitar erro 422 na API do backend)
+            # Transforma em inteiro as strings numéricas
             def _clean_id(val):
                 if isinstance(val, str) and val.isdigit():
                     return int(val)
@@ -142,35 +191,33 @@ class ChatBarberProClient:
             
             payload = {
                 "clientId": cid,
-                "client_id": cid,
                 "serviceId": sid,
-                "service_id": sid,
                 "staffId": stid,
-                "staff_id": stid,
                 "storeId": stid2,
-                "store_id": stid2,
                 "scheduledAt": sched,
-                "scheduled_at": sched,
                 "notes": kwargs.get("notes", "Agendamento via IA Helena")
             }
         
-        # Log do payload para debug (sem dados sensíveis se possível, mas aqui IDs são seguros)
         logger.debug(f"CHATBARBERPRO_PAYLOAD: {payload}")
         
-        return await self._request("POST", "appointments", data=payload)
+        res = await self._request("POST", "appointments", data=payload)
+        
+        # Desempacota: { success, appointment: { id, ... } } → adiciona indicador
+        if isinstance(res, dict) and res.get("success"):
+            return {"status": "success", **res}
+        return res
 
     async def list_services(self) -> List[Dict]:
-        """GET /api/v1/{owner_id}/services"""
+        """GET /api/v1/{owner_id}/services → desempacota { count, services: [...] }"""
         res = await self._request("GET", "services")
-        return res if isinstance(res, list) else []
+        return self._unwrap(res, "services")
 
     async def list_staff(self) -> List[Dict]:
-        """GET /api/v1/{owner_id}/staff"""
+        """GET /api/v1/{owner_id}/staff → desempacota { count, staff: [...] }"""
         res = await self._request("GET", "staff")
-        return res if isinstance(res, list) else []
+        return self._unwrap(res, "staff")
 
     async def list_stores(self) -> List[Dict]:
-        """GET /api/v1/{owner_id}/stores"""
+        """GET /api/v1/{owner_id}/stores → desempacota { count, stores: [...] }"""
         res = await self._request("GET", "stores")
-        return res if isinstance(res, list) else []
-
+        return self._unwrap(res, "stores")
