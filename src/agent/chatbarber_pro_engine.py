@@ -80,9 +80,14 @@ async def consultar_unidades() -> str:
 
 @tool
 async def consultar_servicos() -> str:
-    """Lista serviços e preços."""
-    try: return str(await get_pro_client().list_services())
-    except: return "Serviços indisponíveis."
+    """Lista serviços com ID e Preço."""
+    try:
+        res = await get_pro_client().list_services()
+        out = ["Serviços disponíveis:"]
+        for s in res:
+            out.append(f"- {s.get('name')} (ID: {s.get('id')}) - R$ {s.get('price')}")
+        return "\n".join(out)
+    except: return "Serviços indisponíveis no momento."
 
 @tool
 async def buscar_cliente(telefone: str) -> str:
@@ -192,7 +197,7 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
                 cm += 30
                 if cm >= 60: ch += 1; cm = 0
             if slots:
-                rel.append(f"- {names[sid]}: {', '.join(slots)}")
+                rel.append(f"- {names[sid]} (ID: {sid}): {', '.join(slots)}")
                 found_any = True
         
         # LOG CIRÚRGICO DE SAÍDA [AGENDAMENTO_DEBUG] (Mantemos os detalhes no log do servidor)
@@ -219,18 +224,45 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
 
 @tool
 async def agendar_horario(client_id: str, service_id: str, data_isostring: str, staff_id: str = "", store_id: str = "") -> str:
-    """Confirma o agendamento no sistema."""
+    """Confirma o agendamento. REQUISITO: Use preferencialmente IDs técnicos para service_id, staff_id e store_id."""
+    client = get_pro_client()
+    
+    # RESOLUÇÃO AMIGÁVEL DE IDS (Se a IA mandar nomes por engano)
+    try:
+        # Resolver Store ID se for nome
+        if store_id and not (len(store_id) > 20 and store_id.startswith("cmn")):
+            ss = await client.list_stores()
+            found = next((s for s in ss if store_id.lower() in s["name"].lower() or store_id == str(s["id"])), None)
+            if found: store_id = found["id"]
+
+        # Resolver Service ID se for nome
+        if service_id and not (len(service_id) > 20 and service_id.startswith("cmn")):
+            svs = await client.list_services()
+            found = next((s for s in svs if service_id.lower() in s["name"].lower() or service_id == str(s["id"])), None)
+            if found: service_id = found["id"]
+        
+        # Resolver Staff ID se estiver vazio ou for nome
+        stf = await client.list_staff()
+        if not staff_id or not (len(staff_id) > 20 and staff_id.startswith("cmn")):
+            # Tenta achar pelo nome ou pega o primeiro se a IA não informou
+            found = next((s for s in stf if staff_id and staff_id.lower() in s["name"].lower()), None)
+            if not found and stf: found = stf[0] # Pick first if empty
+            if found: staff_id = found["id"]
+    except Exception as e:
+        logger.warning(f"ID_RESOLUTION_FAILED: {e}")
+
     diag_log = {
-        "client_id": client_id,
-        "service_id": service_id,
-        "staff_id": staff_id,
-        "store_id": store_id,
+        "resolved_client_id": client_id,
+        "resolved_service_id": service_id,
+        "resolved_staff_id": staff_id,
+        "resolved_store_id": store_id,
         "data_solicitada": data_isostring,
         "etapa": "INICIO_CONFIRMACAO"
     }
     logger.info("CONFIRMACAO_DEBUG", **diag_log)
+    
     try:
-        res = await get_pro_client().create_appointment({
+        res = await client.create_appointment({
             "clientId": client_id, 
             "serviceId": service_id, 
             "staffId": staff_id, 
@@ -244,11 +276,11 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
         if success:
             return "AGENDADO COM SUCESSO! ✅ Informe ao cliente que o horário está garantido e peça para ele chegar 5 min antes."
         else:
-            reason = res.get("message") or "Erro desconhecido na API"
-            return f"Erro técnico ao finalizar agendamento: {reason}. Por favor, escale para atendimento humano."
+            reason = res.get("message") or res.get("error") or "Erro desconhecido"
+            return f"Erro técnico ao finalizar agendamento: {reason}."
     except Exception as e:
-        logger.error("CONFIRMACAO_DEBUG_ERROR", error=str(e), exc_info=True)
-        return f"Erro de comunicação ao confirmar: {str(e)}. Escale para humano."
+        logger.error("CONFIRMACAO_DEBUG_ERROR", error=str(e))
+        return f"Erro de comunicação ao confirmar agendamento."
 
 tools = [consultar_unidades, consultar_servicos, buscar_cliente, verificar_disponibilidade, agendar_horario]
 tool_node = ToolNode(tools)
