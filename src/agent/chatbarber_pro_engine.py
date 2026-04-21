@@ -139,6 +139,19 @@ async def consultar_servicos() -> str:
         return "Serviços indisponíveis no momento."
 
 @tool
+async def consultar_planos() -> str:
+    """Consulta os planos de assinatura disponíveis. Use se o cliente perguntar sobre assinaturas, planos ou como se tornar um assinante."""
+    try:
+        client = get_pro_client()
+        result = await client.list_plans()
+        if not result:
+            return "Não encontrei planos de assinatura cadastrados."
+        return _limit_output(result)
+    except Exception as e:
+        logger.error(f"TOOL_ERROR (consultar_planos): {str(e)}")
+        return "Planos de assinatura indisponíveis no momento."
+
+@tool
 async def consultar_profissionais() -> str:
     """Consulta os barbeiros/profissionais disponíveis para obter um staffId válido. Seja discreto com nomes."""
     try:
@@ -155,8 +168,7 @@ async def consultar_profissionais() -> str:
 async def buscar_cliente(telefone: str) -> str:
     """
     Busca cadastro do cliente pelo telefone. SEMPRE use esta ferramenta na PRIMEIRA mensagem!
-    Se encontrar: cumprimente pelo nome e não peça dados de cadastro.
-    Se NÃO encontrar: peça nome completo, telefone e data de nascimento (DD/MM/AAAA).
+    Retorna nome, ID e se ele é um ASSINANTE (subscriber).
     """
     try:
         client = get_pro_client()
@@ -165,92 +177,89 @@ async def buscar_cliente(telefone: str) -> str:
         if result and result.get("found"):
             name = result.get("name", "")
             client_id = result.get("id", "")
+            client_type = result.get("clientType", "WALK_IN")
+            sub = result.get("subscription")
+            sub_status = sub.get("status") if sub else "Nenhum"
+            
             return (
                 f"CLIENTE ENCONTRADO! Nome: {name}, ID: {client_id}. "
-                f"Chame-o pelo nome de forma amigável. NÃO peça dados de cadastro. "
-                f"Pergunte diretamente o que ele deseja agendar."
+                f"Tipo: {client_type}, Assinatura: {sub_status}. "
+                f"Se for ASSINANTE (SUBSCRIBER), trate-o como cliente VIP. "
+                f"NÃO peça dados de cadastro. Pergunte o que ele deseja agendar."
             )
         
         return (
             "CLIENTE NÃO CADASTRADO. Prossiga com o fluxo de cadastro:\n"
             "1. Peça o NOME COMPLETO\n"
-            "2. Confirme o TELEFONE (já temos o WhatsApp)\n"
-            "3. Peça a DATA DE NASCIMENTO (formato DD/MM/AAAA)\n"
-            "Só depois disso, use a ferramenta 'cadastrar_cliente' para registrar."
+            "2. Confirme o TELEFONE\n"
+            "3. Peça a DATA DE NASCIMENTO (DD/MM/AAAA)\n"
+            "Explore se ele tem interesse em nossos PLANOS DE ASSINATURA após o cadastro."
         )
     except Exception as e:
         logger.error(f"TOOL_ERROR (buscar_cliente): {str(e)}")
-        return "Não consegui verificar o cadastro. Pergunte o nome do cliente para prosseguir."
+        return "Não consegui verificar o cadastro."
 
 @tool
-async def verificar_disponibilidade(data_yyyy_mm_dd: str) -> str:
-    \"\"\"
+async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") -> str:
+    """
     Verifica horários DISPONÍVEIS para uma data (YYYY-MM-DD).
-    Retorna horários agrupados por profissional para que o cliente possa escolher com quem agendar.
-    \"\"\"
+    Retorna horários agrupados por profissional e respeita o horário de funcionamento da unidade.
+    """
     try:
         client = get_pro_client()
+        stores = await client.list_stores()
         
-        # 1. Busca Profissionais e Agendamentos
+        # Se houver mais de uma unidade e não foi especificada uma, forçamos a escolha
+        if len(stores) > 1 and not store_id:
+            unidades = [f"- {s.get('name')} (ID: {s.get('id')})" for s in stores]
+            return "Identificamos mais de uma unidade. Por favor, pergunte ao cliente em qual delas ele deseja agendar:\n" + "\n".join(unidades)
+            
+        selected_store = next((s for s in stores if str(s.get('id')) == str(store_id)), (stores[0] if stores else None))
+        if not selected_store: return "Nenhuma unidade encontrada."
+
         staff_list = await client.list_staff()
         raw_appts = await client.list_appointments(date_filter=data_yyyy_mm_dd)
-        
-        if not staff_list:
-            return "Nenhum profissional cadastrado ou disponível no momento."
-            
         appts = raw_appts.get("appointments", []) if isinstance(raw_appts, dict) else []
+
+        dt_obj = datetime.strptime(data_yyyy_mm_dd, "%Y-%m-%d")
+        bh = next((h for h in selected_store.get("businessHours", []) if h.get('dayOfWeek') == dt_obj.weekday()), None)
+        s_h, s_m, e_h, e_m = 8, 0, 20, 0
+        if bh:
+            if not bh.get("isOpen"): return f"A unidade {selected_store.get('name')} está fechada na data {data_yyyy_mm_dd}."
+            s_h, s_m = map(int, bh.get("openTime", "08:00").split(":"))
+            e_h, e_m = map(int, bh.get("closeTime", "20:00").split(":"))
+
+        staff_store = [s for s in staff_list if str(s.get('storeId')) == str(selected_store.get('id'))]
+        if not staff_store: return f"Não há profissionais disponíveis na unidade {selected_store.get('name')}."
         
-        # 2. Mapeia ocupação por profissional
-        ocupacao_por_staff = {str(s['id']): set() for s in staff_list if 'id' in s}
-        staff_names = {str(s['id']): s.get('name', 'Profissional') for s in staff_list if 'id' in s}
-        
+        ocupacao = {str(s['id']): set() for s in staff_store if 'id' in s}
+        names = {str(s['id']): s.get('name', 'Barbeiro') for s in staff_store if 'id' in s}
         for app in appts:
-            s_id = str(app.get("staffId") or app.get("staff_id", ""))
-            sched = app.get("scheduledAt", "")
-            if s_id in ocupacao_por_staff and data_yyyy_mm_dd in sched and "T" in sched:
-                hm = sched.split("T")[1][:5]
-                ocupacao_por_staff[s_id].add(hm)
-        
-        # 3. Gera Grade para cada profissional
+            sid = str(app.get("staffId", ""))
+            if sid in ocupacao and data_yyyy_mm_dd in str(app.get("scheduledAt", "")):
+                ocupacao[sid].add(str(app.get("scheduledAt", "")).split("T")[1][:5])
+
         now = _now_brasilia()
         is_today = data_yyyy_mm_dd == now.strftime("%Y-%m-%d")
-        hora_atual_minutos = now.hour * 60 + now.minute
-        
-        relatorio = [f"Disponibilidade para {data_yyyy_mm_dd}:"]
-        
-        total_slots_count = 0
-        for s_id, ocupados in ocupacao_por_staff.items():
-            disp_staff = []
-            # Grade: 08:00 às 20:00 (ajustado para cobrir até 19:30+)
-            for h in range(8, 21):
-                for m in [0, 30]:
-                    horario = f"{h:02d}:{m:02d}"
-                    horario_minutos = h * 60 + m
-                    
-                    if is_today and horario_minutos <= (hora_atual_minutos + 10):
-                        continue
-                        
-                    if horario not in ocupados:
-                        disp_staff.append(horario)
-            
-            if disp_staff:
-                # Mostra até 30 horários por profissional para não cortar o final do dia
-                slots_txt = ", ".join(disp_staff[:30])
-                relatorio.append(f"- {staff_names[s_id]} (ID: {s_id}): {slots_txt}")
-                total_slots_count += len(disp_staff)
-                
-        if total_slots_count == 0:
-            return f"Não há horários disponíveis com nenhum profissional para {data_yyyy_mm_dd}."
-            
-        return "\n".join(relatorio)
-            
+        min_now = now.hour * 60 + now.minute
+        rel = [f"Horários em '{selected_store.get('name')}' para o dia {data_yyyy_mm_dd}:"]
+        total = 0
+        for sid, ocupados in ocupacao.items():
+            disp = []
+            ch, cm = s_h, s_m
+            while (ch * 60 + cm) < (e_h * 60 + e_m):
+                h_str = f"{ch:02d}:{cm:02d}"
+                if not (is_today and (ch * 60 + cm) <= min_now + 10):
+                    if h_str not in ocupados: disp.append(h_str)
+                cm += 30
+                if cm >= 60: ch += 1; cm = 0
+            if disp:
+                rel.append(f"- {names[sid]}: {', '.join(disp)}")
+                total += len(disp)
+        return "\n".join(rel) if total > 0 else f"Não há horários livres em {selected_store.get('name')} para este dia."
     except Exception as e:
-        logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
-        return "Erro ao acessar a agenda. Tente sugerir um horário para eu verificar."
-            
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (verificar_disponibilidade): {str(e)}")
-        return "Não consegui acessar a agenda. Pergunte qual horário o cliente prefere."
+        logger.error(f"TOOL_ERROR: {e}")
+        return "Erro ao processar agenda."
 
 @tool
 async def cadastrar_cliente(nome: str, telefone: str, data_nascimento: str = "") -> str:
@@ -375,6 +384,7 @@ async def transcribe_audio(audio_base64: str) -> str:
 tools = [
     consultar_unidades,
     consultar_servicos, 
+    consultar_planos,
     consultar_profissionais, 
     buscar_cliente, 
     verificar_disponibilidade, 
@@ -448,7 +458,7 @@ def call_model(state: AgentState):
     telefone_cliente = state.get('context_data', {}).get('telefone_cliente', '')
     datetime_ctx = _get_datetime_context()
     
-    system_content = f\"\"\"{base_persona}
+    system_content = f"""{base_persona}
 
 --- CONTEXTO OPERACIONAL EM TEMPO REAL ---
 {datetime_ctx}
@@ -460,7 +470,8 @@ Telefone do Cliente (WhatsApp): {telefone_cliente}
 3. SERVIÇOS: Seja extremamente preciso ao selecionar o serviço. Se o cliente pedir 'Corte e Barba', procure pelo serviço correspondente na lista (use 'consultar_servicos'). Não invente e não use serviços errados como 'Sobrancelha' para pedidos de corte.
 4. PROFISSIONAIS: Mostre as opções de profissionais disponíveis para o horário escolhido. O cliente tem o direito de escolher. Se ele não tiver preferência, você pode sugerir um, mas informe que há outros.
 5. DISPONIBILIDADE: Ao verificar horários, informe quem são os profissionais disponíveis em cada horário.
-\"\"\"
+6. PLANOS DE ASSINATURA: O sistema possui planos de assinatura. Se o cliente for ASSINANTE (subscriber), trate-o como prioridade. Se for um cliente novo, ofereça a possibilidade de assinar um plano (use 'consultar_planos') para ter benefícios.
+"""
 
     system_msg = SystemMessage(content=system_content)
 
