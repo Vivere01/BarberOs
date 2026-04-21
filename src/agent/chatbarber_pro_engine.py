@@ -172,9 +172,10 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
                 try:
                     # Tenta parsear ISO ou extrair hora direto
                     if "T" in a["scheduledAt"]:
-                        dt_utc = datetime.fromisoformat(a["scheduledAt"].replace("Z", "+00:00"))
-                        dt_br = dt_utc.astimezone(BR_TZ)
-                        h_str = dt_br.strftime("%H:%M")
+                        # Tratamos o horário da API como 'Relógio de Parede' (Naive)
+                        # Ignoramos o offset para evitar que 10:00 vire 07:00 ao ler do banco
+                        item_dt = parser.parse(a['scheduledAt']).replace(tzinfo=None)
+                        h_str = item_dt.strftime("%H:%M")
                     else:
                         h_str = a["scheduledAt"][:5]
                     ocup[sid].add(h_str)
@@ -251,23 +252,19 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
     except Exception as e:
         logger.warning(f"ID_RESOLUTION_FAILED: {e}")
 
-    # NORMALIZAÇÃO DE TIMEZONE (Fix P0: Evita o shift de 3 horas no banco)
+    # MODO RELÓGIO DE PAREDE (Fix P0): Garante que 10:00 agendado seja 10:00 no Dashboard
     try:
         from datetime import datetime
-        import pytz
-        # Tenta extrair a data limpa (YYYY-MM-DDTHH:MM)
+        # Pegamos apenas a parte nominal do horário (YYYY-MM-DDTHH:MM)
         clean_date = data_isostring.split(".")[0]
         if len(clean_date) > 16: clean_date = clean_date[:16]
         
-        # Assume que o que a IA mandou é o horário local de Brasília
-        naive_dt = datetime.strptime(clean_date, "%Y-%m-%dT%H:%M")
-        local_dt = BR_TZ.localize(naive_dt)
-        # Converte para UTC para a API/Banco de dados
-        utc_dt = local_dt.astimezone(pytz.UTC)
-        data_isostring = utc_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        logger.info("TIMEZONE_FIX", original=clean_date, normalizado_utc=data_isostring)
+        # Enviamos para a API com 'Z' mas mantendo o NÚMERO da hora local
+        # Ex: se o cliente quer 10:00 BRT, mandamos 10:00.000Z
+        data_isostring = f"{clean_date}:00.000Z"
+        logger.info("TIMEZONE_WALL_CLOCK_FIX", original=clean_date, final_sent=data_isostring)
     except Exception as e:
-        logger.warning(f"TIMEZONE_NORMALIZATION_FAILED: {e}")
+        logger.warning(f"TIMEZONE_FIX_FAILED: {e}")
 
     diag_log = {
         "resolved_client_id": client_id,
