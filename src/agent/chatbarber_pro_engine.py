@@ -1,7 +1,7 @@
 """
-BarberOS - ChatBarber PRO Engine v2.0 (Resilient Edition)
-=========================================================
-Engine otimizada para evitar erro 400 (OpenAI slicing error).
+BarberOS - ChatBarber PRO Engine v2.0 (Full Interface)
+======================================================
+Engine com todas as funções requeridas pelo evolution_handler.
 """
 from typing import Annotated, TypedDict, List, Optional, Any
 from datetime import datetime, timedelta
@@ -21,7 +21,15 @@ from langchain_core.tools import tool
 
 logger = get_logger("agent.chatbarber_pro")
 
+# Contexto de sessão PRO
 _pro_session_ctx: ContextVar[dict] = ContextVar("chatbarber_pro_session", default={})
+
+def set_pro_context(api_token: str, owner_id: str):
+    """Define as credenciais para o request atual. REQUERIDO pelo evolution_handler."""
+    _pro_session_ctx.set({
+        "api_token": api_token,
+        "owner_id": owner_id
+    })
 
 def get_pro_client() -> ChatBarberProClient:
     ctx = _pro_session_ctx.get({})
@@ -32,6 +40,30 @@ def get_pro_client() -> ChatBarberProClient:
         owner_id=ctx.get("owner_id") or s.chatbarber_owner_slug or s.chatbarber_owner_id,
         base_url=s.chatbarber_base_url
     )
+
+async def transcribe_audio(audio_base64: str) -> str:
+    """Transcreve áudio via Whisper. REQUERIDO pelo evolution_handler."""
+    from openai import AsyncOpenAI
+    from src.config.settings import get_settings
+    import base64, tempfile, os
+    settings = get_settings()
+    api_key = settings.openai_api_key or settings.OPENAI_API_KEY
+    if not api_key: return "[Sistema sem chave OpenAI]"
+    client = AsyncOpenAI(api_key=str(api_key))
+    try:
+        audio_data = base64.b64decode(audio_base64)
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            tmp.write(audio_data)
+            tmp_path = tmp.name
+        try:
+            with open(tmp_path, "rb") as f:
+                res = await client.audio.transcriptions.create(model="whisper-1", file=f, language="pt")
+            return res.text
+        finally:
+            if os.path.exists(tmp_path): os.remove(tmp_path)
+    except Exception as e:
+        logger.error(f"TRANSCRIPTION_FAILED: {e}")
+        return ""
 
 def _now_brasilia() -> datetime:
     return datetime.now(ZoneInfo("America/Sao_Paulo"))
@@ -65,7 +97,7 @@ async def buscar_cliente(telefone: str) -> str:
 
 @tool
 async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") -> str:
-    """Agenda de horários."""
+    """Verifica agenda de horários."""
     try:
         client = get_pro_client()
         stores = await client.list_stores()
@@ -76,7 +108,6 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
         ustaff = [s for s in staff if str(s.get("storeId")) == str(sel.get("id"))]
         appts = (await client.list_appointments(date=data_yyyy_mm_dd)).get("appointments", [])
         
-        # Mapeamento Domingo=0
         dt = datetime.strptime(data_yyyy_mm_dd, "%Y-%m-%d")
         day_api = (dt.weekday() + 1) % 7
         bh = next((h for h in sel.get("businessHours", []) if h.get("dayOfWeek") == day_api), None)
@@ -127,26 +158,21 @@ def call_model(state: AgentState):
     settings = get_settings()
     v = "knowledge/vaults/Brain/Helena"
     try:
-        with open(f"{v}/Persona.md", "r", encoding="utf-8") as f: p = f.read()
-        with open(f"{v}/Rules.md", "r", encoding="utf-8") as f: r = f.read()
-        brain = f"{p}\n\n{r}"
+        with open(f"{v}/Persona.md", "r", encoding="utf-8") as f: persona = f.read()
+        with open(f"{v}/Rules.md", "r", encoding="utf-8") as f: rules = f.read()
+        brain = f"{persona}\n\n{rules}"
     except: brain = "Você é a Helena."
 
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=str(settings.openai_api_key)).bind_tools(tools)
+    openai_key = settings.openai_api_key or settings.OPENAI_API_KEY
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=str(openai_key)).bind_tools(tools)
     
-    # --- RESILIÊNCIA DE HISTÓRICO (O PULHO DO GATO) ---
     all_msgs = state["messages"]
-    # Se cortarmos os últimos 15, precisamos garantir que o primeiro NÃO seja um ToolMessage órfão
     cut = 15
     if len(all_msgs) > cut:
         subset = all_msgs[-cut:]
-        # Remove ToolMessages órfãs no início do bloco cortado
-        while subset and isinstance(subset[0], ToolMessage):
-            subset = subset[1:]
-        # Garante que temos pelo menos uma mensagem humana se o subset ficou vazio
+        while subset and isinstance(subset[0], ToolMessage): subset = subset[1:]
         messages_to_send = subset if subset else all_msgs[-1:]
-    else:
-        messages_to_send = all_msgs
+    else: messages_to_send = all_msgs
 
     sys = f"{brain}\n\nContexto: {state.get('context_data', {})}\nHoje: {_now_brasilia().strftime('%d/%m/%Y %H:%M')}"
     
@@ -155,7 +181,7 @@ def call_model(state: AgentState):
         return {"messages": [res]}
     except Exception as e:
         logger.error(f"ENGINE_CRITICAL_ERROR: {e}")
-        return {"messages": [AIMessage(content=f"Desculpe, tive um problema técnico (Err: {str(e)[:50]}). Pode tentar de novo?")]}
+        return {"messages": [AIMessage(content=f"Desculpe, tive um problema técnico (Err: {str(e)[:50]}). Pode repetir?")]}
 
 def should_continue(state: AgentState):
     if hasattr(state["messages"][-1], "tool_calls") and state["messages"][-1].tool_calls: return "tools"
