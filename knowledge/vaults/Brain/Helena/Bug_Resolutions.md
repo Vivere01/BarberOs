@@ -18,10 +18,11 @@
 - **Escalagem Automática:** IA instruída a parar na 3ª tentativa frustrada e transferir para atendimento humano.
 
 ### Regras que devem ser mantidas para sempre:
-- A função `verificar_disponibilidade()` NUNCA pode retornar false silencioso.
+- **REGRA DE OURO:** A tool `verificar_disponibilidade()` é a fonte de verdade absoluta. O resultado `[FONTE_DE_VERDADE_API]` nunca pode ser ignorado ou contestado pelo raciocínio do modelo.
+- **Is_Fallback Ignorado:** `is_fallback=true` não significa fechado. Se houver slots, agende.
 - O prompt da IA deve ter limite de 2 tentativas de reagendamento.
 - Timezone do servidor deve ser `America/Sao_Paulo`.
-- A unidade deve sempre ser resolvida por ID, nunca apenas por nome string volátil.
+- A unidade deve sempre ser resolvida por ID.
 
 ### Padrão de log implementado:
 Logs JSON via `structlog` com a chave `AGENDAMENTO_DEBUG` contendo `timestamp_requisicao`, `unidade_id_resolvido`, `horario_funcionamento_encontrado` e `slots_disponiveis_encontrados`.

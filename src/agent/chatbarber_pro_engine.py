@@ -195,7 +195,7 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
                 rel.append(f"- {names[sid]}: {', '.join(slots)}")
                 found_any = True
         
-        # LOG CIRÚRGICO DE SAÍDA [AGENDAMENTO_DEBUG]
+        # LOG CIRÚRGICO DE SAÍDA [AGENDAMENTO_DEBUG] (Mantemos os detalhes no log do servidor)
         final_slots = [row for row in rel if row.startswith("- ")]
         diag_log_out = {
             "unidade_id_resolvido": sel.get("id"),
@@ -208,10 +208,11 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
         }
         logger.info("AGENDAMENTO_DEBUG", **diag_log_out)
         
+        # RETORNO PARA A IA: Limpo e sem dados técnicos que causem confusão
         if not found_any:
-            return f"Infelizmente todos os horários (das {o_t} às {c_t}) para {data_yyyy_mm_dd} na unidade {sel.get('name')} já estão ocupados ou o horário solicitado já passou. Gostaria de tentar outro dia ou unidade?"
+            return f"[FONTE_DE_VERDADE_API] Status: INDISPONÍVEL. Motivo: Todos os horários (das {o_t} às {c_t}) na unidade {sel.get('name')} para {data_yyyy_mm_dd} já estão ocupados ou o horário solicitado já passou. PARE e ofereça outro dia."
             
-        return "\n".join(rel)
+        return f"[FONTE_DE_VERDADE_API] Status: DISPONÍVEL (Unidade {sel.get('name')} aberta das {o_t} às {c_t}). Slots livres encontrados:\n" + "\n".join(final_slots)
     except Exception as e:
         logger.error("AGENDAMENTO_DEBUG_CRITICAL_ERROR", error=str(e), exc_info=True)
         return f"Houve um problema técnico ao consultar a agenda (Motivo: {str(e)}). Por favor, aguarde um instante ou peça para falar com um atendente humano."
@@ -279,11 +280,21 @@ def call_model(state: AgentState):
     while window and isinstance(window[0], (ToolMessage, ToolMessage)): 
         window = window[1:]
     
-    sys = f"{brain}\n\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {_now_br().strftime('%d/%m/%Y %H:%M')}"
+    sys = f"{brain}\n\n[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {_now_br().strftime('%d/%m/%Y %H:%M')}\n\nREGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API]. Se o status for DISPONÍVEL, você deve prosseguir com o agendamento."
     try:
-        return {"messages": [llm.invoke([SystemMessage(content=sys)] + window)]}
+        response = llm.invoke([SystemMessage(content=sys)] + window)
+        
+        # LOG DE DECISÃO DO AGENTE [AGENT_DECISION]
+        logger.info("AGENT_DECISION", 
+            pergunta_usuario=window[-1].content if window else "",
+            resposta_gerada=response.content,
+            usou_ferramenta=bool(response.tool_calls)
+        )
+        
+        return {"messages": [response]}
     except Exception as e:
-        return {"messages": [AIMessage(content="Puxa, tivemos uma oscilação. Pode repetir seu pedido?")]}
+        logger.error("AGENT_DECISION_ERROR", error=str(e))
+        return {"messages": [AIMessage(content="Puxa, tivemos uma oscilação técnica. Pode repetir seu pedido?")]}
 
 def should_continue(state: AgentState):
     if hasattr(state["messages"][-1], "tool_calls") and state["messages"][-1].tool_calls: return "tools"
