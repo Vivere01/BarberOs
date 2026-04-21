@@ -141,10 +141,21 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
             o_t = bh.get("openTime") or bh.get("startTime") or "08:00"
             c_t = bh.get("closeTime") or bh.get("endTime") or "19:00"
         
+        # LOG CIRÚRGICO DE ENTRADA [AGENDAMENTO_DEBUG]
+        diag_log = {
+            "timestamp_requisicao": _now_br().isoformat(),
+            "timezone_servidor": str(BR_TZ),
+            "unidade_solicitada": store_id,
+            "data_hora_solicitada": data_yyyy_mm_dd,
+            "etapa": "INICIO_CONSULTA"
+        }
+        logger.info("AGENDAMENTO_DEBUG", **diag_log)
+
         try:
             sh, sm = map(int, o_t.split(":"))
             eh, em = map(int, c_t.split(":"))
-        except:
+        except Exception as e:
+            logger.error("AGENDAMENTO_DEBUG_PARSE_ERROR", error=str(e), open_time=o_t, close_time=c_t)
             sh, sm, eh, em = 8, 0, 19, 0
 
         ocup = {str(s["id"]): set() for s in ustaff}
@@ -184,13 +195,26 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
                 rel.append(f"- {names[sid]}: {', '.join(slots)}")
                 found_any = True
         
+        # LOG CIRÚRGICO DE SAÍDA [AGENDAMENTO_DEBUG]
+        final_slots = [row for row in rel if row.startswith("- ")]
+        diag_log_out = {
+            "unidade_id_resolvido": sel.get("id"),
+            "unidade_nome_resolvido": sel.get("name"),
+            "horario_funcionamento_encontrado": {"open": o_t, "close": c_t, "is_fallback": not bh or not bh.get("isOpen")},
+            "resultado_verificacao_disponibilidade": found_any,
+            "motivo_indisponibilidade": "SEM_SLOTS_LIVRES" if not found_any else None,
+            "slots_disponiveis_encontrados": final_slots,
+            "etapa": "FIM_CONSULTA"
+        }
+        logger.info("AGENDAMENTO_DEBUG", **diag_log_out)
+        
         if not found_any:
-            return f"Infelizmente todos os horários (das {o_t} às {c_t}) para {data_yyyy_mm_dd} na unidade {sel.get('name')} já estão ocupados."
+            return f"Infelizmente todos os horários (das {o_t} às {c_t}) para {data_yyyy_mm_dd} na unidade {sel.get('name')} já estão ocupados ou o horário solicitado já passou. Gostaria de tentar outro dia ou unidade?"
             
         return "\n".join(rel)
     except Exception as e:
-        logger.error(f"ERRO_DISPONIBILIDADE: {e}")
-        return f"Erro técnico ao verificar agenda: {e}"
+        logger.error("AGENDAMENTO_DEBUG_CRITICAL_ERROR", error=str(e), exc_info=True)
+        return f"Houve um problema técnico ao consultar a agenda (Motivo: {str(e)}). Por favor, aguarde um instante ou peça para falar com um atendente humano."
 
 @tool
 async def agendar_horario(client_id: str, service_id: str, data_isostring: str, staff_id: str = "", store_id: str = "") -> str:
