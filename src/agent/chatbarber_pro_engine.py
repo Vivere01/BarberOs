@@ -163,7 +163,7 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
 
         now = _now_br()
         is_today = data_yyyy_mm_dd == now.strftime("%Y-%m-%d")
-        cutoff_min = now.hour * 60 + now.minute + 15 # 15 min de antecedência mínima
+        cutoff_min = now.hour * 60 + now.minute + 5 # 5 min de antecedência mínima
         
         rel = [f"Disponibilidade em {sel.get('name')} para {data_yyyy_mm_dd}:"]
         found_any = False
@@ -182,7 +182,7 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
                 found_any = True
         
         if not found_any:
-            return f"Infelizmente todos os horários para {data_yyyy_mm_dd} na unidade {sel.get('name')} já estão ocupados."
+            return f"Infelizmente todos os horários (das {o_t} às {c_t}) para {data_yyyy_mm_dd} na unidade {sel.get('name')} já estão ocupados."
             
         return "\n".join(rel)
     except Exception as e:
@@ -214,14 +214,22 @@ def call_model(state: AgentState):
 
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=str(s.openai_api_key or s.OPENAI_API_KEY)).bind_tools(tools)
     
-    # Limpeza de histórico para evitar Erro 400
+    # Limpeza de histórico para evitar redundância e Erro 400
     msgs = state["messages"]
-    window = msgs[-10:] # Janela menor e mais segura
-    while window and isinstance(window[0], ToolMessage): window = window[1:]
+    
+    # Filtra mensagens repetidas consecutivas do usuário (evita processar Oi Oi Oi)
+    processed_msgs = []
+    for m in msgs:
+        if not processed_msgs or m.content != processed_msgs[-1].content:
+            processed_msgs.append(m)
+            
+    window = processed_msgs[-8:] # Janela ideal para contexto sem estourar token/custo
+    while window and isinstance(window[0], (ToolMessage, ToolMessage)): 
+        window = window[1:]
     
     sys = f"{brain}\n\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {_now_br().strftime('%d/%m/%Y %H:%M')}"
     try:
-        return {"messages": [llm.invoke([SystemMessage(content=sys)] + (window if window else msgs[-1:]))]}
+        return {"messages": [llm.invoke([SystemMessage(content=sys)] + window)]}
     except Exception as e:
         return {"messages": [AIMessage(content="Puxa, tivemos uma oscilação. Pode repetir seu pedido?")]}
 
