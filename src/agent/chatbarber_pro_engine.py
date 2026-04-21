@@ -219,10 +219,35 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
 @tool
 async def agendar_horario(client_id: str, service_id: str, data_isostring: str, staff_id: str = "", store_id: str = "") -> str:
     """Confirma o agendamento no sistema."""
+    diag_log = {
+        "client_id": client_id,
+        "service_id": service_id,
+        "staff_id": staff_id,
+        "store_id": store_id,
+        "data_solicitada": data_isostring,
+        "etapa": "INICIO_CONFIRMACAO"
+    }
+    logger.info("CONFIRMACAO_DEBUG", **diag_log)
     try:
-        res = await get_pro_client().create_appointment({"clientId": client_id, "serviceId": service_id, "staffId": staff_id, "storeId": store_id, "scheduledAt": data_isostring})
-        return "AGENDADO COM SUCESSO! ✅" if res.get("id") or res.get("success") else "Erro ao finalizar."
-    except: return "Erro de comunicação."
+        res = await get_pro_client().create_appointment({
+            "clientId": client_id, 
+            "serviceId": service_id, 
+            "staffId": staff_id, 
+            "storeId": store_id, 
+            "scheduledAt": data_isostring
+        })
+        
+        success = res.get("id") or res.get("success")
+        logger.info("CONFIRMACAO_DEBUG", etapa="FIM_CONFIRMACAO", sucesso=bool(success), resposta_api=res)
+        
+        if success:
+            return "AGENDADO COM SUCESSO! ✅ Informe ao cliente que o horário está garantido e peça para ele chegar 5 min antes."
+        else:
+            reason = res.get("message") or "Erro desconhecido na API"
+            return f"Erro técnico ao finalizar agendamento: {reason}. Por favor, escale para atendimento humano."
+    except Exception as e:
+        logger.error("CONFIRMACAO_DEBUG_ERROR", error=str(e), exc_info=True)
+        return f"Erro de comunicação ao confirmar: {str(e)}. Escale para humano."
 
 tools = [consultar_unidades, consultar_servicos, buscar_cliente, verificar_disponibilidade, agendar_horario]
 tool_node = ToolNode(tools)
