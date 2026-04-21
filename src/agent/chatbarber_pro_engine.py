@@ -315,16 +315,12 @@ def call_model(state: AgentState):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=str(s.openai_api_key or s.OPENAI_API_KEY)).bind_tools(tools)
     
     # Limpeza de histórico para evitar redundância e Erro 400
-    msgs = state["messages"]
+    messages = state["messages"]
+    # Janela maior (40) para suportar combos de serviços e evitar quebra de protocolo ToolCall
+    window = messages[-40:] 
     
-    # Filtra mensagens repetidas consecutivas do usuário (evita processar Oi Oi Oi)
-    processed_msgs = []
-    for m in msgs:
-        if not processed_msgs or m.content != processed_msgs[-1].content:
-            processed_msgs.append(m)
-            
-    window = processed_msgs[-8:] # Janela ideal para contexto sem estourar token/custo
-    while window and isinstance(window[0], (ToolMessage, ToolMessage)): 
+    # Prevenção de ToolMessage Órfã: Se a janela começar com ToolMessage, removemos para evitar erro 400
+    while window and isinstance(window[0], ToolMessage):
         window = window[1:]
     
     sys = f"{brain}\n\n[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {_now_br().strftime('%d/%m/%Y %H:%M')}\n\nREGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API]. Se o status for DISPONÍVEL, você deve prosseguir com o agendamento."
