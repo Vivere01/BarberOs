@@ -170,8 +170,8 @@ def call_model(state: AgentState):
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=str(settings.openai_api_key)).bind_tools(tools)
     sys = f"{brain}\n\nContexo: {state.get('context_data', {})} \nData/Hora: {_get_datetime_context()}"
     
-    # Sanitização básica para evitar erros 400
-    hist = [m for m in state["messages"] if not (isinstance(m, ToolMessage) and i == 0)]
+    # Sanitização básica para evitar erros 400 (remove ToolMessages órfãs no início)
+    hist = [m for i, m in enumerate(state["messages"]) if not (isinstance(m, ToolMessage) and i == 0)]
     
     try:
         res = llm.invoke([SystemMessage(content=sys)] + hist[-15:])
