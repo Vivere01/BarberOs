@@ -251,12 +251,30 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
     except Exception as e:
         logger.warning(f"ID_RESOLUTION_FAILED: {e}")
 
+    # NORMALIZAÇÃO DE TIMEZONE (Fix P0: Evita o shift de 3 horas no banco)
+    try:
+        from datetime import datetime
+        import pytz
+        # Tenta extrair a data limpa (YYYY-MM-DDTHH:MM)
+        clean_date = data_isostring.split(".")[0]
+        if len(clean_date) > 16: clean_date = clean_date[:16]
+        
+        # Assume que o que a IA mandou é o horário local de Brasília
+        naive_dt = datetime.strptime(clean_date, "%Y-%m-%dT%H:%M")
+        local_dt = BR_TZ.localize(naive_dt)
+        # Converte para UTC para a API/Banco de dados
+        utc_dt = local_dt.astimezone(pytz.UTC)
+        data_isostring = utc_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        logger.info("TIMEZONE_FIX", original=clean_date, normalizado_utc=data_isostring)
+    except Exception as e:
+        logger.warning(f"TIMEZONE_NORMALIZATION_FAILED: {e}")
+
     diag_log = {
         "resolved_client_id": client_id,
         "resolved_service_id": service_id,
         "resolved_staff_id": staff_id,
         "resolved_store_id": store_id,
-        "data_solicitada": data_isostring,
+        "data_final_utc": data_isostring,
         "etapa": "INICIO_CONFIRMACAO"
     }
     logger.info("CONFIRMACAO_DEBUG", **diag_log)
