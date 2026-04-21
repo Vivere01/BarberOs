@@ -2,14 +2,6 @@
 BarberOS - ChatBarber PRO Engine v2.0
 ======================================
 Engine dedicada para o sistema ChatBarber PRO.
-
-Correções v2.0:
-  - Filtro de horários passados (não oferece 09:00 se já são 15:00)
-  - Fluxo de cadastro correto (nome + telefone + data de nascimento)
-  - Identificação automática por telefone (sem pedir dados a clientes conhecidos)
-  - Transcrição de áudio funcional (fix do campo OPENAI_API_KEY)
-  - Agendamento imediato após confirmação (sem redundância)
-  - Client com retry/timeout/pool
 """
 from typing import Annotated, TypedDict, List, Optional, Any
 from datetime import datetime, timedelta
@@ -30,480 +22,170 @@ from src.config.logging_config import get_logger
 
 logger = get_logger("agent.chatbarber_pro")
 
-# Contexto de sessão PRO — isolado por coroutine
 _pro_session_ctx: ContextVar[dict] = ContextVar("chatbarber_pro_session", default={})
 
 def get_pro_client() -> ChatBarberProClient:
-    """Retorna um cliente instanciado com as credenciais do contexto atual."""
     ctx = _pro_session_ctx.get({})
-    token = ctx.get("api_token")
-    owner = ctx.get("owner_id")
-    
     from src.config.settings import get_settings
-    settings = get_settings()
-    
-    if not token or not owner:
-        # Fallback para configurações globais se ausente no contexto
-        token = token or settings.chatbarber_api_key
-        # Prioriza o slug amigável se disponível
-        owner = owner or settings.chatbarber_owner_slug or settings.chatbarber_owner_id 
-        
+    s = get_settings()
     return ChatBarberProClient(
-        api_token=token, 
-        owner_id=owner,
-        base_url=settings.chatbarber_base_url
+        api_key=ctx.get("api_token") or s.chatbarber_api_key, 
+        owner_id=ctx.get("owner_id") or s.chatbarber_owner_slug or s.chatbarber_owner_id,
+        base_url=s.chatbarber_base_url
     )
-
-def set_pro_context(api_token: str, owner_id: str):
-    """Define as credenciais para o request atual."""
-    _pro_session_ctx.set({
-        "api_token": api_token,
-        "owner_id": owner_id
-    })
-
-# ===================================================================
-# Helpers de Data/Hora — Brasília (UTC-3)
-# ===================================================================
-_DIAS_PT = ["segunda-feira", "terça-feira", "quarta-feira",
-            "quinta-feira", "sexta-feira", "sábado", "domingo"]
-_MESES_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho",
-             "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
-
-_TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 def _now_brasilia() -> datetime:
-    """Retorna datetime atual em Brasília."""
-    return datetime.now(_TZ_BRASILIA)
+    return datetime.now(ZoneInfo("America/Sao_Paulo"))
 
 def _get_datetime_context() -> str:
-    """
-    Retorna bloco de data/hora para o system prompt.
-    Inclui hora exata (para filtro de horários passados) e próximos 7 dias.
-    """
     now = _now_brasilia()
-    dia_semana = _DIAS_PT[now.weekday()]
-    mes = _MESES_PT[now.month - 1]
-    
-    # Próximos 7 dias
-    proximos = []
-    for i in range(1, 8):
-        d = now + timedelta(days=i)
-        proximos.append(f"  {_DIAS_PT[d.weekday()]}: {d.strftime('%d/%m/%Y')}")
-    proximos_str = "\n".join(proximos)
-    
     return (
-        f"--- DATA E HORA ATUAL (Brasília / UTC-3) ---\n"
-        f"Hoje é {dia_semana}, {now.day} de {mes} de {now.year}.\n"
-        f"Hora atual: {now.strftime('%H:%M')} (BRT).\n"
-        f"Data ISO: {now.strftime('%Y-%m-%d')}\n\n"
-        f"PRÓXIMOS 7 DIAS:\n{proximos_str}\n\n"
-        f"REGRA OBRIGATÓRIA: Ao chamar ferramentas, use datas no formato ISO 8601: YYYY-MM-DD.\n"
-        f"REGRA DE HORÁRIOS: Hoje é dia {now.strftime('%Y-%m-%d')} e já são {now.strftime('%H:%M')}.\n"
-        f"NUNCA ofereça horários iguais ou anteriores a {now.strftime('%H:%M')} para o dia de HOJE.\n"
-        f"Para dias futuros, qualquer horário comercial é válido.\n"
+        f"Hoje é {_now_brasilia().strftime('%A')}, {now.day}/{now.month}/{now.year}.\n"
+        f"Hora atual: {now.strftime('%H:%M')}.\n"
+        f"PRÓXIMOS DIAS: {(now+timedelta(days=1)).strftime('%d/%m')} em diante.\n"
     )
-
-# ===================================================================
-# Tools do ChatBarber PRO
-# ===================================================================
-
-def _limit_output(result: Any, max_len: int = 4000) -> str:
-    res_str = str(result)
-    if len(res_str) > max_len:
-        logger.warning(f"TOOL_PAYLOAD_TOO_LARGE: Truncando de {len(res_str)} para {max_len}")
-        return res_str[:max_len] + "... [TRUNCADO]"
-    return res_str
 
 @tool
 async def consultar_unidades() -> str:
-    """Consulta as unidades (lojas) disponíveis para obter o store_id correto. Use se houver dúvida sobre qual barbearia o cliente deseja."""
+    """Retorna lista de unidades e seus IDs."""
     try:
         client = get_pro_client()
-        result = await client.list_stores()
-        return _limit_output(result)
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (consultar_unidades): {str(e)}")
-        return "Não consegui listar as unidades."
+        return str(await client.list_stores())
+    except: return "Erro ao listar unidades."
 
 @tool
 async def consultar_servicos() -> str:
-    """Consulta os serviços disponíveis (nome, preço, ID). Use antes de agendar para obter o serviceId correto."""
+    """Retorna lista de serviços e IDs."""
     try:
         client = get_pro_client()
-        result = await client.list_services()
-        if isinstance(result, dict) and result.get("error"):
-            return "Serviçoes temporariamente indisponíveis. Pergunte ao cliente qual serviço deseja e siga em frente."
-        return _limit_output(result)
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (consultar_servicos): {str(e)}")
-        return "Serviços indisponíveis no momento."
-
-@tool
-async def consultar_planos() -> str:
-    """Consulta os planos de assinatura disponíveis. Use se o cliente perguntar sobre assinaturas, planos ou como se tornar um assinante."""
-    try:
-        client = get_pro_client()
-        result = await client.list_plans()
-        if not result:
-            return "Não encontrei planos de assinatura cadastrados."
-        return _limit_output(result)
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (consultar_planos): {str(e)}")
-        return "Planos de assinatura indisponíveis no momento."
-
-@tool
-async def consultar_profissionais() -> str:
-    """Consulta os barbeiros/profissionais disponíveis para obter um staffId válido. Seja discreto com nomes."""
-    try:
-        client = get_pro_client()
-        result = await client.list_staff()
-        if isinstance(result, dict) and result.get("error"):
-            return ""
-        return _limit_output(result)
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (consultar_profissionais): {str(e)}")
-        return ""
+        return str(await client.list_services())
+    except: return "Erro ao listar serviços."
 
 @tool
 async def buscar_cliente(telefone: str) -> str:
-    """
-    Busca cadastro do cliente pelo telefone. SEMPRE use esta ferramenta na PRIMEIRA mensagem!
-    Retorna nome, ID e se ele é um ASSINANTE (subscriber).
-    """
+    """Identifica cliente pelo telefone."""
     try:
         client = get_pro_client()
-        result = await client.search_client_by_phone(telefone)
-        
-        if result and result.get("found"):
-            name = result.get("name", "")
-            client_id = result.get("id", "")
-            client_type = result.get("clientType", "WALK_IN")
-            sub = result.get("subscription")
-            sub_status = sub.get("status") if sub else "Nenhum"
-            
-            return (
-                f"CLIENTE ENCONTRADO! Nome: {name}, ID: {client_id}. "
-                f"Tipo: {client_type}, Assinatura: {sub_status}. "
-                f"Se for ASSINANTE (SUBSCRIBER), trate-o como cliente VIP. "
-                f"NÃO peça dados de cadastro. Pergunte o que ele deseja agendar."
-            )
-        
-        return (
-            "CLIENTE NÃO CADASTRADO. Prossiga com o fluxo de cadastro:\n"
-            "1. Peça o NOME COMPLETO\n"
-            "2. Confirme o TELEFONE\n"
-            "3. Peça a DATA DE NASCIMENTO (DD/MM/AAAA)\n"
-            "Explore se ele tem interesse em nossos PLANOS DE ASSINATURA após o cadastro."
-        )
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (buscar_cliente): {str(e)}")
-        return "Não consegui verificar o cadastro."
+        res = await client.search_client_by_phone(telefone)
+        if res.get("found"):
+            return f"CLIENTE VIP: {res.get('name')} (ID: {res.get('id')}). Assinatura: {res.get('subscription', {}).get('status', 'Nenhum')}. Prossiga."
+        return "Novo cliente. Peça Nome, Telefone e Nascimento."
+    except: return "Erro na busca."
 
 @tool
 async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") -> str:
-    """
-    Verifica horários DISPONÍVEIS para uma data (YYYY-MM-DD).
-    Retorna horários agrupados por profissional e respeita o horário de funcionamento da unidade.
-    """
+    """Verifica horários disponíveis cruzando horários de funcionamento e agendamentos."""
+    client = get_pro_client()
     try:
-        client = get_pro_client()
         stores = await client.list_stores()
+        sel = next((s for s in stores if str(s.get("id")) == str(store_id)), (stores[0] if stores else None))
+        if not sel: return "Selecione uma unidade."
+
+        # Mapeamento do dia da semana (API usa 0=Seg ou 0=Dom? Vamos testar 0=Seg, 6=Dom padrão ISO)
+        # Na API do Prisma/ChatBarber usamos Sunday=0. Python weekday() Monday=0.
+        dt = datetime.strptime(data_yyyy_mm_dd, "%Y-%m-%d")
+        # Ajuste: Sun=0, Mon=1... Sat=6
+        day_api = (dt.weekday() + 1) % 7
         
-        # Se houver mais de uma unidade e não foi especificada uma, forçamos a escolha
-        if len(stores) > 1 and not store_id:
-            unidades = [f"- {s.get('name')} (ID: {s.get('id')})" for s in stores]
-            return "Identificamos mais de uma unidade. Por favor, pergunte ao cliente em qual delas ele deseja agendar:\n" + "\n".join(unidades)
-            
-        selected_store = next((s for s in stores if str(s.get('id')) == str(store_id)), (stores[0] if stores else None))
-        if not selected_store: return "Nenhuma unidade encontrada."
+        bh = next((h for h in sel.get("businessHours", []) if h.get("dayOfWeek") == day_api), None)
+        if not bh or not bh.get("isOpen"): return f"Unidade fechada em {data_yyyy_mm_dd}."
 
-        staff_list = await client.list_staff()
-        raw_appts = await client.list_appointments(date_filter=data_yyyy_mm_dd)
-        appts = raw_appts.get("appointments", []) if isinstance(raw_appts, dict) else []
+        # CORREÇÃO: Chaves corretas vindas da API (openTime/closeTime)
+        ot, ct = bh.get("openTime", "08:00"), bh.get("closeTime", "19:00")
+        sh, sm = map(int, ot.split(":"))
+        eh, em = map(int, ct.split(":"))
 
-        dt_obj = datetime.strptime(data_yyyy_mm_dd, "%Y-%m-%d")
-        bh = next((h for h in selected_store.get("businessHours", []) if h.get('dayOfWeek') == dt_obj.weekday()), None)
-        s_h, s_m, e_h, e_m = 8, 0, 20, 0
-        if bh:
-            if not bh.get("isOpen"): return f"A unidade {selected_store.get('name')} está fechada na data {data_yyyy_mm_dd}."
-            s_h, s_m = map(int, bh.get("openTime", "08:00").split(":"))
-            e_h, e_m = map(int, bh.get("closeTime", "20:00").split(":"))
-
-        staff_store = [s for s in staff_list if str(s.get('storeId')) == str(selected_store.get('id'))]
-        if not staff_store: return f"Não há profissionais disponíveis na unidade {selected_store.get('name')}."
+        staff = await client.list_staff()
+        ustaff = [s for s in staff if str(s.get("storeId")) == str(sel.get("id"))]
         
-        ocupacao = {str(s['id']): set() for s in staff_store if 'id' in s}
-        names = {str(s['id']): s.get('name', 'Barbeiro') for s in staff_store if 'id' in s}
-        for app in appts:
-            sid = str(app.get("staffId", ""))
-            if sid in ocupacao and data_yyyy_mm_dd in str(app.get("scheduledAt", "")):
-                ocupacao[sid].add(str(app.get("scheduledAt", "")).split("T")[1][:5])
+        appts_res = await client.list_appointments(date=data_yyyy_mm_dd)
+        apps = appts_res.get("appointments", [])
+        
+        ocup = {str(s["id"]): set() for s in ustaff}
+        names = {str(s["id"]): s["name"] for s in ustaff}
+        for a in apps:
+            sid = str(a.get("staffId"))
+            if sid in ocup: ocup[sid].add(str(a.get("scheduledAt", "")).split("T")[1][:5])
 
         now = _now_brasilia()
         is_today = data_yyyy_mm_dd == now.strftime("%Y-%m-%d")
-        min_now = now.hour * 60 + now.minute
-        rel = [f"Horários em '{selected_store.get('name')}' para o dia {data_yyyy_mm_dd}:"]
-        total = 0
-        for sid, ocupados in ocupacao.items():
+        min_n = now.hour * 60 + now.minute
+        rel = [f"Agenda em '{sel.get('name')}' ({data_yyyy_mm_dd}):"]
+        cnt = 0
+        for sid, ocu in ocup.items():
             disp = []
-            ch, cm = s_h, s_m
-            while (ch * 60 + cm) < (e_h * 60 + e_m):
+            ch, cm = sh, sm
+            while (ch * 60 + cm) < (eh * 60 + em):
                 h_str = f"{ch:02d}:{cm:02d}"
-                if not (is_today and (ch * 60 + cm) <= min_now + 10):
-                    if h_str not in ocupados: disp.append(h_str)
+                if not (is_today and (ch * 60 + cm) <= min_n + 15):
+                    if h_str not in ocu: disp.append(h_str)
                 cm += 30
                 if cm >= 60: ch += 1; cm = 0
             if disp:
-                rel.append(f"- {names[sid]}: {', '.join(disp)}")
-                total += len(disp)
-        return "\n".join(rel) if total > 0 else f"Não há horários livres em {selected_store.get('name')} para este dia."
+                rel.append(f"- {names[sid]} (ID: {sid}): {', '.join(disp)}")
+                cnt += len(disp)
+        
+        return "\n".join(rel) if cnt > 0 else "Sem horários hoje."
     except Exception as e:
-        logger.error(f"TOOL_ERROR: {e}")
-        return "Erro ao processar agenda."
+        logger.error(f"VERIFICAR_DISP_ERRO: {e}")
+        return f"Não consegui ler a agenda da unidade (Erro: {e})"
 
 @tool
 async def cadastrar_cliente(nome: str, telefone: str, data_nascimento: str = "") -> str:
-    """
-    Cadastra um novo cliente no sistema.
-    Parâmetros:
-    - nome: Nome completo do cliente
-    - telefone: Telefone com DDD (ex: 11999998888)
-    - data_nascimento: Data de nascimento no formato YYYY-MM-DD (convertido de DD/MM/AAAA)
-    """
+    """Cria novo cliente."""
     try:
         client = get_pro_client()
-        raw_data = await client.create_client(
-            name=nome, 
-            phone=telefone,
-            birth_date=data_nascimento if data_nascimento else None
-        )
-        
-        if isinstance(raw_data, dict) and raw_data.get("error"):
-            return f"Erro ao cadastrar: {raw_data.get('detail', 'erro desconhecido')}. Prossiga e tente agendar mesmo assim."
-        
-        # Tenta extrair o ID do cliente criado
-        client_id = ""
-        if isinstance(raw_data, dict):
-            client_id = raw_data.get("id", raw_data.get("clientId", ""))
-        
-        return f"Cliente '{nome}' cadastrado com sucesso! ID: {client_id}. Agora prossiga para o agendamento."
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (cadastrar_cliente): {str(e)}")
-        return "Erro no cadastro, mas vamos prosseguir com o agendamento."
+        # Fallback date
+        if not data_nascimento: data_nascimento = "1990-01-01"
+        res = await client.create_client({"name": nome, "phone": telefone, "birthDate": data_nascimento})
+        return f"Sucesso! ID: {res.get('id')}. Pode agendar."
+    except: return "Erro ao cadastrar. Tente agendar direto."
 
 @tool
 async def agendar_horario(client_id: str, service_id: str, data_isostring: str, staff_id: str = "", store_id: str = "") -> str:
-    """CONFIRMA e cria o agendamento no sistema. SÓ use após o cliente dizer 'SIM' ou autorizar. Tente incluir staff_id e store_id se possível."""
-    client = get_pro_client()
+    """Agenda final. Requer IDs."""
     try:
-        if not store_id:
-            stores = await client.list_stores()
-            if isinstance(stores, list) and len(stores) == 1:
-                store_id = str(stores[0].get("id", ""))
-                
-        if not staff_id:
-            staff = await client.list_staff()
-            if isinstance(staff, list) and len(staff) == 1:
-                staff_id = str(staff[0].get("id", ""))
-                
-        if not store_id or not staff_id:
-            return "ERRO DE VALIDAÇÃO: Faltou 'staff_id' ou 'store_id'. Use 'consultar_unidades' e 'consultar_profissionais' para descobrir os IDs, e pergunte ao cliente se necessário."
+        client = get_pro_client()
+        res = await client.create_appointment({"clientId": client_id, "serviceId": service_id, "staffId": staff_id, "storeId": store_id, "scheduledAt": data_isostring})
+        return "AGENDADO COM SUCESSO! ✅" if res.get("id") or res.get("success") else f"Erro: {res}"
+    except: return "Erro na conexão final."
 
-        res = await client.create_appointment(
-            client_id=client_id,
-            service_id=service_id,
-            staff_id=staff_id,
-            store_id=store_id,
-            scheduled_at=data_isostring
-        )
-        
-        if isinstance(res, dict):
-            if res.get("status") in ["success", "created"] or "id" in res or "appointment" in res:
-                return "SUCESSO: Agendamento realizado com êxito."
-            err = res.get("error") or res.get("detail") or res.get("message")
-            return f"ERRO: A API retornou: {err or 'Erro desconhecido'}"
-            
-        return f"ERRO: Resposta da API inesperada: {res}"
-    except Exception as e:
-        logger.error(f"TOOL_ERROR (agendar_horario): {str(e)}")
-        return f"ERRO_CONEXAO: {str(e)}"
-
-
-# ===================================================================
-# Transcrição de Áudio
-# ===================================================================
-async def transcribe_audio(audio_base64: str) -> str:
-    """Transcreve áudio base64 usando Whisper da OpenAI com diagnóstico profundo."""
-    from openai import AsyncOpenAI
-    from src.config.settings import get_settings
-    import base64
-    import tempfile
-    import os
-    
-    settings = get_settings()
-    # Pega qualquer uma das duas variáveis de chave (prioriza minúscula)
-    api_key = settings.openai_api_key or settings.OPENAI_API_KEY
-    
-    if not api_key:
-        logger.error("TRANSCRIPTION_ERROR: Chave OpenAI (OPENAI_API_KEY) não encontrada nas configurações.")
-        return "[Sistema sem chave de API para áudio]"
-        
-    # Diagnóstico seguro da chave
-    masked_key = f"{api_key[:7]}...{api_key[-4:]}" if len(api_key) > 10 else "INVÁLIDA"
-    logger.info(f"AUDIO_DEBUG: Iniciando transcrição. Chave={masked_key}. Base64={len(audio_base64)} chars")
-        
-    client = AsyncOpenAI(api_key=api_key)
-    tmp_path = None
-    try:
-        audio_data = base64.b64decode(audio_base64)
-        # WhatsApp envia OGG/Opus. Whisper aceita .ogg.
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-            tmp.write(audio_data)
-            tmp_path = tmp.name
-            
-        try:
-            with open(tmp_path, "rb") as audio_file:
-                res = await client.audio.transcriptions.create(
-                    model="whisper-1", 
-                    file=audio_file,
-                    language="pt"
-                )
-            logger.info(f"TRANSCRIPTION_SUCCESS: '{res.text[:50]}...'")
-            return res.text
-        finally:
-            if tmp_path and os.path.exists(tmp_path):
-                os.remove(tmp_path)
-    except Exception as e:
-        logger.error("TRANSCRIPTION_FAILED", error=str(e))
-        return ""
-
-
-# ===================================================================
-# Registro de Tools
-# ===================================================================
-tools = [
-    consultar_unidades,
-    consultar_servicos, 
-    consultar_planos,
-    consultar_profissionais, 
-    buscar_cliente, 
-    verificar_disponibilidade, 
-    cadastrar_cliente, 
-    agendar_horario
-]
+tools = [consultar_unidades, consultar_servicos, buscar_cliente, verificar_disponibilidade, cadastrar_cliente, agendar_horario]
 tool_node = ToolNode(tools)
 
-# ===================================================================
-# Estado do Agente
-# ===================================================================
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add]
     context_data: dict
 
-# ===================================================================
-# Sanitizador de Mensagens (Anti-400 da OpenAI)
-# ===================================================================
-def _sanitize_messages(messages: List[BaseMessage]) -> List[BaseMessage]:
-    """Remove ToolMessages órfãos do início da fatia que causam erro 400."""
-    if not messages:
-        return messages
-    start = 0
-    for i, msg in enumerate(messages):
-        if isinstance(msg, ToolMessage):
-            has_ai_parent = False
-            for j in range(i - 1, -1, -1):
-                if isinstance(messages[j], AIMessage) and getattr(messages[j], "tool_calls", None):
-                    has_ai_parent = True
-                    break
-                if isinstance(messages[j], HumanMessage):
-                    break
-            if not has_ai_parent:
-                start = i + 1
-        else:
-            break
-    if start > 0:
-        logger.warning(f"SANITIZE: Removidas {start} ToolMessages órfãs")
-    return messages[start:]
-
-# ===================================================================
-# Lógica do Modelo
-# ===================================================================
 def call_model(state: AgentState):
     settings = get_settings()
-    
-    # Carregamento do Cérebro via Obsidian Wiki (LLM Wiki)
-    vault_path = "knowledge/vaults/Brain/Helena"
+    v = "knowledge/vaults/Brain/Helena"
     try:
-        with open(f"{vault_path}/Persona.md", "r", encoding="utf-8") as f:
-            persona_content = f.read()
-        with open(f"{vault_path}/Rules.md", "r", encoding="utf-8") as f:
-            rules_content = f.read()
-        with open(f"{vault_path}/Flows.md", "r", encoding="utf-8") as f:
-            flows_content = f.read()
-            
-        base_persona = f"{persona_content}\n\n{rules_content}\n\n{flows_content}"
-    except Exception as e:
-        logger.warning(f"Wiki Brain não encontrado em {vault_path}, usando fallback: {e}")
-        base_persona = "Você é a Helena, recepcionista virtual simpática."
+        with open(f"{v}/Persona.md", "r", encoding="utf-8") as f: persona = f.read()
+        with open(f"{v}/Rules.md", "r", encoding="utf-8") as f: rules = f.read()
+        with open(f"{v}/Flows.md", "r", encoding="utf-8") as f: flows = f.read()
+        brain = f"{persona}\n\n{rules}\n\n{flows}"
+    except: brain = "Você é a Helena."
 
-    llm = ChatOpenAI(
-        model="gpt-4o-mini",
-        temperature=0,
-        openai_api_key=str(settings.openai_api_key),
-        max_retries=1,
-        request_timeout=30
-    )
-    llm = llm.bind_tools(tools)
+    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=str(settings.openai_api_key)).bind_tools(tools)
+    sys = f"{brain}\n\nContexo: {state.get('context_data', {})} \nData/Hora: {_get_datetime_context()}"
     
-    telefone_cliente = state.get('context_data', {}).get('telefone_cliente', '')
-    datetime_ctx = _get_datetime_context()
-    
-    system_content = f"""{base_persona}
-
---- CONTEXTO OPERACIONAL EM TEMPO REAL ---
-{datetime_ctx}
-Telefone do Cliente (WhatsApp): {telefone_cliente}
-
-⚠️ INSTRUÇÕES CRUCIAIS DE AGENDAMENTO:
-1. IDENTIFICAÇÃO: Se não chamou 'buscar_cliente', faça isso IMEDIATAMENTE.
-2. MÚLTIPLAS UNIDADES: Se o sistema tiver mais de uma unidade/loja (use 'consultar_unidades'), você DEVE perguntar ao cliente em qual unidade ele deseja o atendimento antes de prosseguir.
-3. SERVIÇOS: Seja extremamente preciso ao selecionar o serviço. Se o cliente pedir 'Corte e Barba', procure pelo serviço correspondente na lista (use 'consultar_servicos'). Não invente e não use serviços errados como 'Sobrancelha' para pedidos de corte.
-4. PROFISSIONAIS: Mostre as opções de profissionais disponíveis para o horário escolhido. O cliente tem o direito de escolher. Se ele não tiver preferência, você pode sugerir um, mas informe que há outros.
-5. DISPONIBILIDADE: Ao verificar horários, informe quem são os profissionais disponíveis em cada horário.
-6. PLANOS DE ASSINATURA: O sistema possui planos de assinatura. Se o cliente for ASSINANTE (subscriber), trate-o como prioridade. Se for um cliente novo, ofereça a possibilidade de assinar um plano (use 'consultar_planos') para ter benefícios.
-"""
-
-    system_msg = SystemMessage(content=system_content)
-
-    # Janela de memória: últimas 15 mensagens, sanitizadas
-    history = state["messages"][-15:]
-    history = _sanitize_messages(history)
-    messages = [system_msg] + history
+    # Sanitização básica para evitar erros 400
+    hist = [m for m in state["messages"] if not (isinstance(m, ToolMessage) and i == 0)]
     
     try:
-        response = llm.invoke(messages)
-        return {"messages": [response]}
+        res = llm.invoke([SystemMessage(content=sys)] + hist[-15:])
+        return {"messages": [res]}
     except Exception as e:
-        logger.error(f"PRO_BRAIN_INVOKE_ERROR: {str(e)}")
-        return {"messages": [AIMessage(content="Poxa, deu uma oscilação aqui no meu sistema, você me perdoa? Poderia repetir o que deseja? 😊")]}
+        return {"messages": [AIMessage(content=f"Oscilação técnica: {e}. Poderia repetir?")]}
 
-# ===================================================================
-# Verificador de Fluxo
-# ===================================================================
 def should_continue(state: AgentState):
-    last_message = state["messages"][-1]
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "tools"
+    if hasattr(state["messages"][-1], "tool_calls") and state["messages"][-1].tool_calls: return "tools"
     return END
 
-# ===================================================================
-# Construção do Grafo
-# ===================================================================
 def create_pro_brain():
     workflow = StateGraph(AgentState)
-    workflow.add_node("agent", call_model)
-    workflow.add_node("tools", tool_node)
-    workflow.set_entry_point("agent")
-    workflow.add_conditional_edges("agent", should_continue)
+    workflow.add_node("agent", call_model); workflow.add_node("tools", tool_node)
+    workflow.set_entry_point("agent"); workflow.add_conditional_edges("agent", should_continue)
     workflow.add_edge("tools", "agent")
     return workflow.compile(checkpointer=MemorySaver())
