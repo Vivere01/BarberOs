@@ -119,24 +119,27 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
         appts_res = await client.list_appointments(date=data_yyyy_mm_dd)
         appts = appts_res.get("appointments", [])
         
-        # Mapeamento do dia da semana (API costuma usar 0-6 ou 1-7)
+        # Mapeamento do dia da semana resiliente
         dt = datetime.strptime(data_yyyy_mm_dd, "%Y-%m-%d")
-        day_py = dt.weekday() # 0=Seg, 6=Dom
-        day_0_sun = (day_py + 1) % 7 # 0=Dom, 1=Seg
-        day_1_mon = day_py + 1 # 1=Seg, 7=Dom
+        day_py = dt.weekday() 
+        days_to_check = [
+            str(day_py),             # 0=Seg (Padrão Python)
+            str((day_py + 1) % 7),   # 0=Dom (Padrão JS/API)
+            str(day_py + 1)          # 1=Seg (Padrão ISO)
+        ]
         
         # Busca o horário de funcionamento (Business Hours)
         bhs = sel.get("businessHours", [])
-        bh = next((h for h in bhs if str(h.get("dayOfWeek")) in [str(day_0_sun), str(day_1_mon)]), None)
+        bh = next((h for h in bhs if str(h.get("dayOfWeek")) in days_to_check), None)
         
+        # FALLBACK CRÍTICO: Se não houver config de horário ou estiver marcado como fechado, 
+        # assume 08:00-19:00 para não bloquear o agendamento por falta de metadados.
         if not bh or not bh.get("isOpen"):
-            # Diagnostic message para o log/IA
-            dias_abertos = [str(h.get("dayOfWeek")) for h in bhs if h.get("isOpen")]
-            return f"A unidade {sel.get('name')} não possui expediente aberto para o dia informado ({data_yyyy_mm_dd}). Tente outro dia."
-
-        # Suporte a diferentes nomes de campos de horário
-        o_t = bh.get("openTime") or bh.get("startTime") or "08:00"
-        c_t = bh.get("closeTime") or bh.get("endTime") or "19:00"
+            logger.warning(f"FALLBACK_HOURS: Unidade {sel.get('name')} sem horário para {data_yyyy_mm_dd}. Usando 08:00-19:00.")
+            o_t, c_t = "08:00", "19:00"
+        else:
+            o_t = bh.get("openTime") or bh.get("startTime") or "08:00"
+            c_t = bh.get("closeTime") or bh.get("endTime") or "19:00"
         
         try:
             sh, sm = map(int, o_t.split(":"))
