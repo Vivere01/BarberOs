@@ -22,9 +22,13 @@ from src.config.logging_config import get_logger
 from langchain_core.tools import tool
 
 logger = get_logger("agent.chatbarber_pro")
-BR_TZ = ZoneInfo("America/Sao_Paulo")
+DEFAULT_TZ = "America/Sao_Paulo"
 
-def _now_br(): return datetime.now(BR_TZ)
+def _now_br(tz_name: str = None): 
+    try:
+        return datetime.now(ZoneInfo(tz_name or DEFAULT_TZ))
+    except:
+        return datetime.now(ZoneInfo(DEFAULT_TZ))
 
 def _get_calendar_reference():
     """Gera uma tabela de referência de dias da semana para os próximos 14 dias."""
@@ -67,8 +71,7 @@ async def transcribe_audio(audio_base64: str) -> str:
             if os.path.exists(p): os.remove(p)
     except: return ""
 
-def _now_br() -> datetime:
-    return datetime.now(BR_TZ)
+# A função _now_br agora é dinâmica e reside no topo do arquivo.
 
 @tool
 async def consultar_unidades() -> str:
@@ -170,10 +173,15 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
             c_t = bh.get("closeTime") or bh.get("endTime") or bh.get("end") or "20:00"
             is_fallback = False
         
+        # DETECÇÃO DE FUSO HORÁRIO DINÂMICO
+        tz_name = sel.get("timezone") or sel.get("ianaTimezone") or DEFAULT_TZ_NAME
+        tz = get_tz(tz_name)
+        now_local = datetime.now(tz)
+
         # LOG CIRÚRGICO DE ENTRADA [AGENDAMENTO_DEBUG]
         diag_log = {
-            "timestamp_requisicao": _now_br().isoformat(),
-            "timezone_servidor": str(BR_TZ),
+            "timestamp_requisicao": now_local.isoformat(),
+            "timezone_detectado": tz_name,
             "unidade_solicitada": store_id,
             "data_hora_solicitada": data_yyyy_mm_dd,
             "etapa": "INICIO_CONSULTA"
@@ -205,9 +213,8 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
                     ocup[sid].add(h_str)
                 except: continue
 
-        now = _now_br()
-        is_today = data_yyyy_mm_dd == now.strftime("%Y-%m-%d")
-        cutoff_min = now.hour * 60 + now.minute + 5 # 5 min de antecedência mínima
+        is_today = data_yyyy_mm_dd == now_local.strftime("%Y-%m-%d")
+        cutoff_min = now_local.hour * 60 + now_local.minute + 5 # 5 min de antecedência mínima
         
         rel = [f"Disponibilidade em {sel.get('name')} para {data_yyyy_mm_dd}:"]
         found_any = False
@@ -327,8 +334,18 @@ def call_model(state: AgentState):
     while window and isinstance(window[0], ToolMessage):
         window = window[1:]
     
-    cal = _get_calendar_reference()
-    sys = f"{brain}\n\n{cal}\n\n[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {_now_br().strftime('%d/%m/%Y %H:%M')}\n\nREGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API].\nREGRA DE PREFERÊNCIA: Respeite SEMPRE a preferência do cliente por um barbeiro específico. Se ele mencionar um nome, você DEVE agendar com este profissional se estiver disponível."
+    # Tenta pegar o fuso da primeira loja para o prompt (Data/Hora Agora)
+    client = get_pro_client()
+    try:
+        stores_prompt = await client.list_stores()
+        main_tz = stores_prompt[0].get("timezone") or stores_prompt[0].get("ianaTimezone") if stores_prompt else DEFAULT_TZ
+    except:
+        main_tz = DEFAULT_TZ
+        
+    now_str = _now_br(main_tz).strftime("%d/%m/%Y %H:%M")
+    cal = _get_calendar_reference() # O calendário também usa _now_br internamente
+    
+    sys = f"{brain}\n\n{cal}\n\n[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {now_str}\n\nREGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API].\nREGRA DE PREFERÊNCIA: Respeite SEMPRE a preferência do cliente por um barbeiro específico. Se ele mencionar um nome, você DEVE agendar com este profissional se estiver disponível."
     
     try:
         response = llm.invoke([SystemMessage(content=sys)] + window)
