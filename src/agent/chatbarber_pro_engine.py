@@ -311,7 +311,10 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
             return "AGENDADO COM SUCESSO! ✅ Lembre o cliente de chegar 5 min antes."
         return f"Erro técnico na API: {res.get('message') or res.get('error') or 'Desconhecido'}."
     except Exception as e:
-        return f"Erro de comunicação: {str(e)}"
+        logger.error("AGENDAMENTO_FINAL_ERROR", error=str(e), payload={
+            "clientId": client_id, "serviceId": service_id, "staffId": staff_id, "storeId": store_id, "scheduledAt": data_isostring
+        }, exc_info=True)
+        return f"Erro técnico ao registrar no banco de dados (Motivo: {str(e)}). Por favor, tente novamente ou fale com um humano."
 
 tools = [consultar_unidades, consultar_servicos, buscar_cliente, verificar_disponibilidade, agendar_horario]
 tool_node = ToolNode(tools)
@@ -349,7 +352,16 @@ async def call_model(state: AgentState):
     now_str = _now_br(main_tz).strftime("%d/%m/%Y %H:%M")
     cal = _get_calendar_reference() # O calendário também usa _now_br internamente
     
-    sys = f"{brain}\n\n{cal}\n\n[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {now_str}\n\nREGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API].\nREGRA DE PREFERÊNCIA: Respeite SEMPRE a preferência do cliente por um barbeiro específico. Se ele mencionar um nome, você DEVE agendar com este profissional se estiver disponível."
+    sys = f"{brain}\n\n{cal}\n\n"
+    sys += "PROTOCOLO DE ATENDIMENTO (OBRIGATÓRIO):\n"
+    sys += "1. IDENTIFICAÇÃO: Se o cliente não for reconhecido pelo telefone, peça o nome.\n"
+    sys += "2. UNIDADE: SEMPRE confirme a Unidade física antes de mostrar horários.\n"
+    sys += "3. PREFERÊNCIA: Pergunte explicitamente se o cliente tem preferência por algum barbeiro específico.\n"
+    sys += "4. DISPONIBILIDADE: Mostre os horários baseados na unidade e profissional escolhido.\n"
+    sys += "5. COMBOS: Se o cliente pedir vários serviços (ex: Corte e Barba), envie TODOS os IDs de serviço separados por vírgula no agendamento.\n\n"
+    sys += f"[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {now_str}\n\n"
+    sys += "REGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API].\n"
+    sys += "REGRA DE PREFERÊNCIA: Respeite SEMPRE a preferência do cliente por um barbeiro. Se ele mencionar um nome (ex: Juarez), use o staffId dele."
     
     try:
         response = llm.invoke([SystemMessage(content=sys)] + window)
