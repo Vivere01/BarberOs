@@ -175,8 +175,11 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
             is_fallback = False
         
         # DETECÇÃO DE FUSO HORÁRIO DINÂMICO
-        tz_name = sel.get("timezone") or sel.get("ianaTimezone") or DEFAULT_TZ_NAME
-        tz = get_tz(tz_name)
+        tz_name = sel.get("timezone") or sel.get("ianaTimezone") or DEFAULT_TZ
+        try:
+            tz = ZoneInfo(tz_name)
+        except:
+            tz = ZoneInfo(DEFAULT_TZ)
         now_local = datetime.now(tz)
 
         # LOG CIRÚRGICO DE ENTRADA [AGENDAMENTO_DEBUG]
