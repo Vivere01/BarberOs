@@ -158,7 +158,7 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
             "6": ["6", "sábado", "saturday"]
         }
         
-        target_day = str(date_obj.weekday())
+        target_day = str(dt_obj.weekday())
         bh = next((h for h in bhs if str(h.get("dayOfWeek")).lower() in day_map.get(target_day, [])), None)
         
         # FALLBACK PARA 20:00 (Conforme configuração do cliente)
