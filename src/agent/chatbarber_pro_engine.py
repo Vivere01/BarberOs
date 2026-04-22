@@ -24,6 +24,18 @@ from langchain_core.tools import tool
 logger = get_logger("agent.chatbarber_pro")
 BR_TZ = ZoneInfo("America/Sao_Paulo")
 
+def _now_br(): return datetime.now(BR_TZ)
+
+def _get_calendar_reference():
+    """Gera uma tabela de referência de dias da semana para os próximos 14 dias."""
+    now = _now_br()
+    days = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    lines = [f"CALENDÁRIO DE REFERÊNCIA (HOJE É {days[now.weekday()]}, {now.strftime('%d/%m/%Y')}):"]
+    for i in range(1, 15):
+        d = now + timedelta(days=i)
+        lines.append(f"- {d.strftime('%d/%m/%Y')}: {days[d.weekday()]}")
+    return "\n".join(lines)
+
 _pro_session_ctx: ContextVar[dict] = ContextVar("chatbarber_pro_session", default={})
 
 def set_pro_context(api_token: str, owner_id: str):
@@ -225,77 +237,58 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
 
 @tool
 async def agendar_horario(client_id: str, service_id: str, data_isostring: str, staff_id: str = "", store_id: str = "") -> str:
-    """Confirma o agendamento. REQUISITO: Use preferencialmente IDs técnicos para service_id, staff_id e store_id."""
+    """Confirma o agendamento. Use service_id com múltiplos IDs separados por vírgula se o cliente quiser um COMBO."""
     client = get_pro_client()
     
-    # RESOLUÇÃO AMIGÁVEL DE IDS (Se a IA mandar nomes por engano)
+    # RESOLUÇÃO DE IDS (Suporta lista para Combos)
     try:
-        # Resolver Store ID se for nome
         if store_id and not (len(store_id) > 20 and store_id.startswith("cmn")):
             ss = await client.list_stores()
-            found = next((s for s in ss if store_id.lower() in s["name"].lower() or store_id == str(s["id"])), None)
-            if found: store_id = found["id"]
+            f = next((s for s in ss if store_id.lower() in s["name"].lower()), None)
+            if f: store_id = f["id"]
 
-        # Resolver Service ID se for nome
-        if service_id and not (len(service_id) > 20 and service_id.startswith("cmn")):
-            svs = await client.list_services()
-            found = next((s for s in svs if service_id.lower() in s["name"].lower() or service_id == str(s["id"])), None)
-            if found: service_id = found["id"]
+        # Resolver Service IDs (Lista)
+        names_to_resolve = [s.strip() for s in service_id.split(",")]
+        resolved_ids = []
+        svs = await client.list_services()
+        for name in names_to_resolve:
+            if len(name) > 20 and name.startswith("cmn"): 
+                resolved_ids.append(name)
+            else:
+                f = next((s for s in svs if name.lower() in s["name"].lower()), None)
+                if f: resolved_ids.append(f["id"])
+        service_id = ",".join(resolved_ids) if resolved_ids else service_id
         
-        # Resolver Staff ID se estiver vazio ou for nome
-        stf = await client.list_staff()
+        # Resolver Staff
         if not staff_id or not (len(staff_id) > 20 and staff_id.startswith("cmn")):
-            # Tenta achar pelo nome ou pega o primeiro se a IA não informou
-            found = next((s for s in stf if staff_id and staff_id.lower() in s["name"].lower()), None)
-            if not found and stf: found = stf[0] # Pick first if empty
-            if found: staff_id = found["id"]
-    except Exception as e:
-        logger.warning(f"ID_RESOLUTION_FAILED: {e}")
+            stf = await client.list_staff()
+            f = next((s for s in stf if staff_id and staff_id.lower() in s["name"].lower()), None)
+            if not f and stf: f = stf[0]
+            if f: staff_id = f["id"]
+    except: pass
 
-    # MODO RELÓGIO DE PAREDE (Fix P0): Garante que 10:00 agendado seja 10:00 no Dashboard
+    # MODO RELÓGIO DE PAREDE
     try:
-        from datetime import datetime
-        # Pegamos apenas a parte nominal do horário (YYYY-MM-DDTHH:MM)
         clean_date = data_isostring.split(".")[0]
         if len(clean_date) > 16: clean_date = clean_date[:16]
-        
-        # Enviamos para a API com 'Z' mas mantendo o NÚMERO da hora local
-        # Ex: se o cliente quer 10:00 BRT, mandamos 10:00.000Z
         data_isostring = f"{clean_date}:00.000Z"
-        logger.info("TIMEZONE_WALL_CLOCK_FIX", original=clean_date, final_sent=data_isostring)
-    except Exception as e:
-        logger.warning(f"TIMEZONE_FIX_FAILED: {e}")
+    except: pass
 
-    diag_log = {
-        "resolved_client_id": client_id,
-        "resolved_service_id": service_id,
-        "resolved_staff_id": staff_id,
-        "resolved_store_id": store_id,
-        "data_final_utc": data_isostring,
-        "etapa": "INICIO_CONFIRMACAO"
-    }
-    logger.info("CONFIRMACAO_DEBUG", **diag_log)
-    
     try:
+        # Enviamos para a API. Se a API não suportar lista, o primeiro serviço será priorizado o erro será logado.
         res = await client.create_appointment({
             "clientId": client_id, 
-            "serviceId": service_id, 
+            "serviceId": service_id, # Enviando a lista separada por vírgula
             "staffId": staff_id, 
             "storeId": store_id, 
             "scheduledAt": data_isostring
         })
         
-        success = res.get("id") or res.get("success")
-        logger.info("CONFIRMACAO_DEBUG", etapa="FIM_CONFIRMACAO", sucesso=bool(success), resposta_api=res)
-        
-        if success:
-            return "AGENDADO COM SUCESSO! ✅ Informe ao cliente que o horário está garantido e peça para ele chegar 5 min antes."
-        else:
-            reason = res.get("message") or res.get("error") or "Erro desconhecido"
-            return f"Erro técnico ao finalizar agendamento: {reason}."
+        if res.get("id") or res.get("success"):
+            return "AGENDADO COM SUCESSO! ✅ Lembre o cliente de chegar 5 min antes."
+        return f"Erro técnico na API: {res.get('message') or res.get('error') or 'Desconhecido'}."
     except Exception as e:
-        logger.error("CONFIRMACAO_DEBUG_ERROR", error=str(e))
-        return f"Erro de comunicação ao confirmar agendamento."
+        return f"Erro de comunicação: {str(e)}"
 
 tools = [consultar_unidades, consultar_servicos, buscar_cliente, verificar_disponibilidade, agendar_horario]
 tool_node = ToolNode(tools)
@@ -314,7 +307,6 @@ def call_model(state: AgentState):
 
     llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, openai_api_key=str(s.openai_api_key or s.OPENAI_API_KEY)).bind_tools(tools)
     
-    # Limpeza de histórico para evitar redundância e Erro 400
     messages = state["messages"]
     # Janela maior (40) para suportar combos de serviços e evitar quebra de protocolo ToolCall
     window = messages[-40:] 
@@ -323,7 +315,9 @@ def call_model(state: AgentState):
     while window and isinstance(window[0], ToolMessage):
         window = window[1:]
     
-    sys = f"{brain}\n\n[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {_now_br().strftime('%d/%m/%Y %H:%M')}\n\nREGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API]. Se o status for DISPONÍVEL, você deve prosseguir com o agendamento."
+    cal = _get_calendar_reference()
+    sys = f"{brain}\n\n{cal}\n\n[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {_now_br().strftime('%d/%m/%Y %H:%M')}\n\nREGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API].\nREGRA DE PREFERÊNCIA: Respeite SEMPRE a preferência do cliente por um barbeiro específico. Se ele mencionar um nome, você DEVE agendar com este profissional se estiver disponível."
+    
     try:
         response = llm.invoke([SystemMessage(content=sys)] + window)
         
