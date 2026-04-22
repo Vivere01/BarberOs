@@ -147,16 +147,28 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
         
         # Busca o horário de funcionamento (Business Hours)
         bhs = sel.get("businessHours", [])
-        bh = next((h for h in bhs if str(h.get("dayOfWeek")) in days_to_check), None)
+        # MAPEAMENTO ROBUSTO DE DIAS (Suporta Número ou Nome em PT/EN)
+        day_map = {
+            "0": ["0", "domingo", "sunday"],
+            "1": ["1", "segunda", "monday", "segunda-feira"],
+            "2": ["2", "terça", "tuesday", "terça-feira"],
+            "3": ["3", "quarta", "wednesday", "quarta-feira"],
+            "4": ["4", "quinta", "thursday", "quinta-feira"],
+            "5": ["5", "sexta", "friday", "sexta-feira"],
+            "6": ["6", "sábado", "saturday"]
+        }
         
-        # FALLBACK CRÍTICO: Se não houver config de horário ou estiver marcado como fechado, 
-        # assume 08:00-19:00 para não bloquear o agendamento por falta de metadados.
-        if not bh or not bh.get("isOpen"):
-            logger.warning(f"FALLBACK_HOURS: Unidade {sel.get('name')} sem horário para {data_yyyy_mm_dd}. Usando 08:00-19:00.")
-            o_t, c_t = "08:00", "19:00"
+        target_day = str(date_obj.weekday())
+        bh = next((h for h in bhs if str(h.get("dayOfWeek")).lower() in day_map.get(target_day, [])), None)
+        
+        # FALLBACK PARA 20:00 (Conforme configuração do cliente)
+        if not bh or not bh.get("isOpen", True):
+            o_t, c_t = "08:00", "20:00"
+            is_fallback = True
         else:
-            o_t = bh.get("openTime") or bh.get("startTime") or "08:00"
-            c_t = bh.get("closeTime") or bh.get("endTime") or "19:00"
+            o_t = bh.get("openTime") or bh.get("startTime") or bh.get("start") or "08:00"
+            c_t = bh.get("closeTime") or bh.get("endTime") or bh.get("end") or "20:00"
+            is_fallback = False
         
         # LOG CIRÚRGICO DE ENTRADA [AGENDAMENTO_DEBUG]
         diag_log = {
@@ -218,7 +230,7 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
         diag_log_out = {
             "unidade_id_resolvido": sel.get("id"),
             "unidade_nome_resolvido": sel.get("name"),
-            "horario_funcionamento_encontrado": {"open": o_t, "close": c_t, "is_fallback": not bh or not bh.get("isOpen")},
+            "horario_funcionamento_encontrado": {"open": o_t, "close": c_t, "is_fallback": is_fallback},
             "resultado_verificacao_disponibilidade": found_any,
             "motivo_indisponibilidade": "SEM_SLOTS_LIVRES" if not found_any else None,
             "slots_disponiveis_encontrados": final_slots,
