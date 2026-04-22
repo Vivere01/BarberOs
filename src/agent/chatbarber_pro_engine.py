@@ -317,7 +317,7 @@ class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], add]
     context_data: dict
 
-def call_model(state: AgentState):
+async def call_model(state: AgentState):
     s = get_settings()
     try:
         with open("knowledge/vaults/Brain/Helena/Persona.md", "r", encoding="utf-8") as f: p = f.read()
