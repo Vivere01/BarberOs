@@ -273,17 +273,33 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
             f = next((s for s in ss if store_id.lower() in s["name"].lower()), None)
             if f: store_id = f["id"]
 
-        # Resolver Service IDs (Lista)
-        names_to_resolve = [s.strip() for s in service_id.split(",")]
+        # Resolver Service IDs (Separa por vírgula, ' e ', '&')
+        import re
+        # Normaliza separadores para vírgula
+        raw_services = re.split(r',| e | & ', service_id, flags=re.IGNORECASE)
+        names_to_resolve = [s.strip() for s in raw_services if s.strip()]
+        
         resolved_ids = []
         svs = await client.list_services()
         for name in names_to_resolve:
-            if len(name) > 20 and name.startswith("cmn"): 
+            # Se já for um ID (formato comum de UUID ou ID da API)
+            if len(name) > 20: 
                 resolved_ids.append(name)
+                continue
+            
+            # Busca por nome (case insensitive e parcial)
+            f = next((s for s in svs if name.lower() in s["name"].lower()), None)
+            if f: 
+                resolved_ids.append(f["id"])
             else:
-                f = next((s for s in svs if name.lower() in s["name"].lower()), None)
-                if f: resolved_ids.append(f["id"])
-        service_id = ",".join(resolved_ids) if resolved_ids else service_id
+                # Tenta busca reversa: se o nome do serviço da API está contido no que o cliente disse
+                f_rev = next((s for s in svs if s["name"].lower() in name.lower()), None)
+                if f_rev: resolved_ids.append(f_rev["id"])
+
+        if not resolved_ids:
+            return f"Não consegui identificar os serviços '{service_id}' no sistema. Por favor, use nomes como aparecem na lista."
+        
+        service_id = ",".join(resolved_ids)
         
         # Resolver Staff
         if not staff_id or not (len(staff_id) > 20 and staff_id.startswith("cmn")):
