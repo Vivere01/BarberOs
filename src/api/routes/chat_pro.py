@@ -39,8 +39,12 @@ async def process_chat_pro(request: ChatProInput):
             if not message_text or message_text.strip() == "":
                 message_text = "[O cliente enviou um áudio mas não foi possível transcrever. Peça gentilmente para ele digitar o que deseja.]"
 
-    # Define o contexto de segurança para este request específico
-    set_pro_context(api_token=request.api_token, owner_id=request.owner_id)
+    # Define o contexto de segurança para este request específico (incluindo o telefone do cliente)
+    set_pro_context(
+        api_token=request.api_token, 
+        owner_id=request.owner_id, 
+        extra_data={"remote_jid": request.phone}
+    )
     
     # FIX BUG #1: config PRECISA ser criado aqui — era NameError antes
     config = {

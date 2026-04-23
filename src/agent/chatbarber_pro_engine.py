@@ -43,8 +43,10 @@ def _get_calendar_reference():
 
 _pro_session_ctx: ContextVar[dict] = ContextVar("chatbarber_pro_session", default={})
 
-def set_pro_context(api_token: str, owner_id: str):
-    _pro_session_ctx.set({"api_token": api_token, "owner_id": owner_id})
+def set_pro_context(api_token: str, owner_id: str, extra_data: dict = None):
+    data = {"api_token": api_token, "owner_id": owner_id}
+    if extra_data: data.update(extra_data)
+    _pro_session_ctx.set(data)
 
 def get_pro_client() -> ChatBarberProClient:
     ctx = _pro_session_ctx.get({})
@@ -268,14 +270,18 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
     ctx = _pro_session_ctx.get({})
     
     # Tenta recuperar o clientId se ele veio vazio (Busca por telefone do contexto)
-    if not client_id or client_id == "None":
-        phone = ctx.get("remote_jid", "").split("@")[0]
-        if phone:
+    if not client_id or client_id == "None" or len(str(client_id)) < 5:
+        # Busca o jid no contexto (veio da rota chat_pro)
+        jid = ctx.get("remote_jid") or ctx.get("from")
+        if jid:
+            phone = jid.split("@")[0].split(":")[0] # Remove @s.whatsapp.net e :1
             search = await client.search_client_by_phone(phone)
             if search.get("found"):
                 client_id = search.get("id")
             else:
-                return "Não consegui localizar seu cadastro. Por favor, me informe seu nome completo para que eu possa te cadastrar e finalizar o agendamento."
+                return "Não consegui localizar seu cadastro pelo número de telefone. Por favor, me informe seu NOME COMPLETO para que eu possa finalizar seu agendamento agora mesmo."
+        else:
+            return "Não consegui identificar seu número. Por favor, me informe seu NOME para o cadastro."
 
     # RESOLUÇÃO DE IDS
     try:
