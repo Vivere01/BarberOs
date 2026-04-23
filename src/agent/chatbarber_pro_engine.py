@@ -260,7 +260,10 @@ async def verificar_disponibilidade(data_yyyy_mm_dd: str, store_id: str = "") ->
 
 @tool
 async def agendar_horario(client_id: str, service_id: str, data_isostring: str, staff_id: str = "", store_id: str = "") -> str:
-    """Confirma o agendamento. Use service_id com múltiplos IDs separados por vírgula se o cliente quiser um COMBO."""
+    """Confirma o agendamento no sistema."""
+    if not service_id or service_id == "None":
+        return "Para concluir, por favor, pergunte ao cliente qual serviço ele deseja realizar (ex: Corte, Barba, etc) e mostre as opções se necessário."
+    
     client = get_pro_client()
     
     # RESOLUÇÃO DE IDS (Suporta lista para Combos)
@@ -290,12 +293,20 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
             if f: staff_id = f["id"]
     except: pass
 
-    # MODO RELÓGIO DE PAREDE
+    # MODO RELÓGIO DE PAREDE (Garante o 'T' para o ISO 8601 estrito)
     try:
+        # Substitui espaço por T se necessário
+        if " " in data_isostring:
+            data_isostring = data_isostring.replace(" ", "T")
+        
         clean_date = data_isostring.split(".")[0]
-        if len(clean_date) > 16: clean_date = clean_date[:16]
-        data_isostring = f"{clean_date}:00.000Z"
-    except: pass
+        if "T" not in clean_date: # Caso venha apenas a data
+             return "Erro: Formato de hora inválido. Certifique-se de ter a hora escolhida."
+             
+        if len(clean_date) > 19: clean_date = clean_date[:19]
+        data_isostring = f"{clean_date}.000Z"
+    except Exception as e:
+        logger.error("DATE_FORMAT_ERROR", date=data_isostring, error=str(e))
 
     try:
         # Enviamos para a API. Se a API não suportar lista, o primeiro serviço será priorizado o erro será logado.
@@ -361,6 +372,7 @@ async def call_model(state: AgentState):
     sys += "5. COMBOS: Se o cliente pedir vários serviços (ex: Corte e Barba), envie TODOS os IDs de serviço separados por vírgula no agendamento.\n\n"
     sys += f"[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {now_str}\n\n"
     sys += "REGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API].\n"
+    sys += "REGRA DE FLUXO: Se uma ferramenta retornar que precisa de mais informações (como o serviço), NÃO peça desculpas por erro técnico. Apenas pergunte ao cliente de forma natural.\n"
     sys += "REGRA DE PREFERÊNCIA: Respeite SEMPRE a preferência do cliente por um barbeiro. Se ele mencionar um nome (ex: Juarez), use o staffId dele."
     
     try:
