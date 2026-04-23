@@ -265,8 +265,19 @@ async def agendar_horario(client_id: str, service_id: str, data_isostring: str, 
         return "Para concluir, por favor, pergunte ao cliente qual serviço ele deseja realizar (ex: Corte, Barba, etc) e mostre as opções se necessário."
     
     client = get_pro_client()
+    ctx = _pro_session_ctx.get({})
     
-    # RESOLUÇÃO DE IDS (Suporta lista para Combos)
+    # Tenta recuperar o clientId se ele veio vazio (Busca por telefone do contexto)
+    if not client_id or client_id == "None":
+        phone = ctx.get("remote_jid", "").split("@")[0]
+        if phone:
+            search = await client.search_client_by_phone(phone)
+            if search.get("found"):
+                client_id = search.get("id")
+            else:
+                return "Não consegui localizar seu cadastro. Por favor, me informe seu nome completo para que eu possa te cadastrar e finalizar o agendamento."
+
+    # RESOLUÇÃO DE IDS
     try:
         if store_id and not (len(store_id) > 20 and store_id.startswith("cmn")):
             ss = await client.list_stores()
@@ -388,7 +399,8 @@ async def call_model(state: AgentState):
     sys += "5. COMBOS: Se o cliente pedir vários serviços (ex: Corte e Barba), envie TODOS os IDs de serviço separados por vírgula no agendamento.\n\n"
     sys += f"[DADO VERIFICADO PELA API - NÃO QUESTIONE]\nContexo: {state.get('context_data', {})}\nData/Hora Agora: {now_str}\n\n"
     sys += "REGRA ABSOLUTA: Confie exclusivamente nos retornos marcados como [FONTE_DE_VERDADE_API].\n"
-    sys += "REGRA DE FLUXO: Se uma ferramenta retornar que precisa de mais informações (como o serviço), NÃO peça desculpas por erro técnico. Apenas pergunte ao cliente de forma natural.\n"
+    sys += "REGRA DE DISPONIBILIDADE: Se o cliente mudar de horário ou dia, CHAME a ferramenta verificar_disponibilidade novamente. NÃO assuma que um horário está ocupado baseado em consultas anteriores.\n"
+    sys += "REGRA DE FLUXO: Se uma ferramenta retornar que precisa de mais informações (como o serviço ou nome), NÃO peça desculpas por erro técnico. Apenas pergunte ao cliente de forma natural.\n"
     sys += "REGRA DE PREFERÊNCIA: Respeite SEMPRE a preferência do cliente por um barbeiro. Se ele mencionar um nome (ex: Juarez), use o staffId dele."
     
     try:
